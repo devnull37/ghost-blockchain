@@ -23,22 +23,6 @@ pub fn calculate_difficulty_adjustment<T: Config>(
 	(current_difficulty * adjustment_factor) / 100
 }
 
-/// Verify Proof-of-Work using Blake2-256 (ASIC-resistant, fast for 5-second blocks)
-pub fn verify_pow(block_header: &GhostBlockHeader, target_difficulty: u64) -> bool {
-	let hash_input = (
-		block_header.number,
-		block_header.parent_hash,
-		block_header.state_root,
-		block_header.extrinsics_root,
-		block_header.nonce,
-	);
-
-	let hash = BlakeTwo256::hash_of(&hash_input);
-	let hash_value = u64::from_be_bytes(hash.as_bytes()[0..8].try_into().unwrap_or_default());
-
-	hash_value <= target_difficulty
-}
-
 /// Enhanced Blake2 PoW with additional ASIC resistance
 pub fn verify_pow_enhanced(block_header: &GhostBlockHeader, target_difficulty: u64) -> bool {
 	// Double hash for additional ASIC resistance
@@ -57,48 +41,6 @@ pub fn verify_pow_enhanced(block_header: &GhostBlockHeader, target_difficulty: u
 	hash_value <= target_difficulty
 }
 
-/// Alternative: Verify Proof-of-Work using double SHA-256 (Bitcoin-style)
-pub fn verify_pow_sha256(block_header: &GhostBlockHeader, target_difficulty: u64) -> bool {
-	use sp_core::sha2_256;
-
-	let hash_input = (
-		block_header.number,
-		block_header.parent_hash,
-		block_header.state_root,
-		block_header.extrinsics_root,
-		block_header.nonce,
-	);
-
-	// First SHA-256
-	let first_hash = sha2_256(&hash_input.encode());
-
-	// Second SHA-256 (Bitcoin standard)
-	let final_hash = sha2_256(&first_hash);
-
-	// Convert first 8 bytes to u64 for difficulty comparison
-	let hash_value = u64::from_be_bytes(final_hash[0..8].try_into().unwrap_or_default());
-
-	hash_value <= target_difficulty
-}
-
-/// Alternative: Verify Proof-of-Work using Keccak-256 (Ethereum-style)
-pub fn verify_pow_keccak(block_header: &GhostBlockHeader, target_difficulty: u64) -> bool {
-	use sp_core::keccak_256;
-
-	let hash_input = (
-		block_header.number,
-		block_header.parent_hash,
-		block_header.state_root,
-		block_header.extrinsics_root,
-		block_header.nonce,
-	);
-
-	let hash = keccak_256(&hash_input.encode());
-	let hash_value = u64::from_be_bytes(hash[0..8].try_into().unwrap_or_default());
-
-	hash_value <= target_difficulty
-}
-
 /// Select PoS validator based on stake weight
 pub fn select_pos_validator<T: Config>(
 	stakers: Vec<ValidatorStake<T::AccountId, BalanceOf<T>>>,
@@ -108,11 +50,12 @@ pub fn select_pos_validator<T: Config>(
 		return None;
 	}
 
-	let total_weight: u64 = stakers.iter().map(|s| s.weight).sum();
-	if total_weight == 0 {
+	let total_stake = TotalStake::<T>::get();
+	if total_stake.is_zero() {
 		return None;
 	}
 
+	let total_weight: u64 = total_stake.saturated_into();
 	let mut random_value = u64::from_be_bytes(seed.as_bytes()[0..8].try_into().unwrap_or_default());
 	random_value %= total_weight;
 
@@ -172,39 +115,66 @@ pub fn distribute_rewards<T: Config>(
 	reward: BlockReward<BalanceOf<T>>,
 ) -> DispatchResult {
 	// Reward the miner
-	pallet_balances::Pallet::<T>::mutate(&miner, |balance| {
-		*balance += reward.miner_reward;
-	});
+	T::Currency::deposit_creating(&miner, reward.miner_reward);
 
 	// Distribute to stakers proportionally
-	let total_stake: BalanceOf<T> = stakers.iter().map(|s| s.stake).sum();
+	let total_stake = TotalStake::<T>::get();
 	if !total_stake.is_zero() {
 		for staker in stakers {
 			let staker_reward = (reward.stakers_reward * staker.stake) / total_stake;
-			pallet_balances::Pallet::<T>::mutate(&staker.account, |balance| {
-				*balance += staker_reward;
-			});
+			T::Currency::deposit_creating(&staker.account, staker_reward);
 		}
 	}
 
 	Ok(())
 }
 
-/// Check for slashing conditions
+/// Check for slashing conditions like downtime
 pub fn check_slashing_conditions<T: Config>(
-	validator: T::AccountId,
+	validator: &T::AccountId,
+	current_block_number: u32,
 ) -> Option<SlashingReason> {
-	// This function would need access to storage, so it's better implemented in the pallet
-	// For now, return None
+	let last_active = LastActiveBlock::<T>::get(validator);
+	if current_block_number - last_active > T::MaxDowntimeBlocks::get() {
+		return Some(SlashingReason::Downtime);
+	}
+
 	None
 }
 
-/// Apply slashing
+/// Apply slashing for a given reason
 pub fn apply_slashing<T: Config>(
-	validator: T::AccountId,
+	validator: &T::AccountId,
 	reason: SlashingReason,
 ) -> DispatchResult {
-	// This function should be implemented in the pallet where storage access is available
-	// For now, just return Ok
+	let slash_percentage = match reason {
+		SlashingReason::DoubleSigning => T::DoubleSignSlashPercentage::get(),
+		SlashingReason::InvalidBlock => T::InvalidBlockSlashPercentage::get(),
+		SlashingReason::Downtime => T::DowntimeSlashPercentage::get(),
+		SlashingReason::Other => 10, // Default slash
+	};
+
+	let total_stake = ValidatorStakes::<T>::get(validator).unwrap_or_default();
+	let slash_amount = (total_stake * slash_percentage.into()) / 100u32.into();
+
+	if slash_amount.is_zero() {
+		return Ok(());
+	}
+
+	// Reduce the validator's stake
+	ValidatorStakes::<T>::mutate(validator, |stake| {
+		*stake = stake.saturating_sub(slash_amount);
+	});
+
+	// Use the Currency trait to slash the corresponding balance from the pallet's account
+	let pallet_account = Pallet::<T>::account_id();
+	let _ = T::Currency::slash(&pallet_account, slash_amount);
+
+	Pallet::<T>::deposit_event(Event::ValidatorSlashed {
+		validator: validator.clone(),
+		reason,
+		amount: slash_amount,
+	});
+
 	Ok(())
 }

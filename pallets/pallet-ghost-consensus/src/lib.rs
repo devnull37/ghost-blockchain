@@ -31,9 +31,12 @@ use frame_support::pallet_prelude::*;
 use frame_system::pallet_prelude::*;
 use sp_core::H256;
 use sp_runtime::traits::{BlakeTwo256, Hash, SaturatedConversion};
+use frame_support::traits::{Currency, ReservableCurrency, ExistenceRequirement};
 
 use crate::types::*;
 use crate::functions::*;
+
+type BalanceOf<T> = <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -41,12 +44,15 @@ pub mod pallet {
 
 	/// The pallet's configuration trait.
 	#[pallet::config]
-	pub trait Config: frame_system::Config + pallet_balances::Config {
+	pub trait Config: frame_system::Config {
 		/// The overarching runtime event type.
 		type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 
 		/// Weight information for extrinsics.
 		type WeightInfo: WeightInfo;
+
+		/// The currency trait.
+		type Currency: Currency<Self::AccountId> + ReservableCurrency<Self::AccountId>;
 
 		/// Block reward amount
 		#[pallet::constant]
@@ -92,9 +98,17 @@ pub mod pallet {
 	#[pallet::storage]
 	pub type BlockHeaders<T> = StorageMap<_, Blake2_128Concat, u32, GhostBlockHeader>;
 
+	/// Miners of each block
+	#[pallet::storage]
+	pub type BlockMiners<T: Config> = StorageMap<_, Blake2_128Concat, u32, T::AccountId>;
+
 	/// Validator stakes
 	#[pallet::storage]
 	pub type ValidatorStakes<T> = StorageMap<_, Blake2_128Concat, T::AccountId, BalanceOf<T>>;
+
+	/// Total stake in the system
+	#[pallet::storage]
+	pub type TotalStake<T: Config> = StorageValue<_, BalanceOf<T>, ValueQuery>;
 
 	/// Last active block for validators
 	#[pallet::storage]
@@ -190,6 +204,9 @@ pub mod pallet {
 			// Store the block header
 			BlockHeaders::<T>::insert(block_header.number, block_header.clone());
 
+			// Store the miner for this block
+			BlockMiners::<T>::insert(block_header.number, miner.clone());
+
 			// Update last active block for miner
 			LastActiveBlock::<T>::insert(&miner, block_header.number);
 
@@ -217,16 +234,12 @@ pub mod pallet {
 			ensure!(amount >= T::MinStake::get(), Error::<T>::InsufficientStake);
 
 			// Transfer tokens to stake
-			pallet_balances::Pallet::<T>::transfer(
-				RawOrigin::Signed(staker.clone()).into(),
-				staker.clone(),
-				Self::account_id(),
-				amount,
-			)?;
+			T::Currency::transfer(&staker, &Self::account_id(), amount, ExistenceRequirement::KeepAlive)?;
 
 			// Update stake
 			let current_stake = ValidatorStakes::<T>::get(&staker).unwrap_or_default();
 			ValidatorStakes::<T>::insert(&staker, current_stake + amount);
+			TotalStake::<T>::mutate(|total| *total += amount);
 
 			Ok(())
 		}
@@ -247,14 +260,10 @@ pub mod pallet {
 
 			// Update stake
 			ValidatorStakes::<T>::insert(&staker, current_stake - amount);
+			TotalStake::<T>::mutate(|total| *total -= amount);
 
 			// Transfer tokens back
-			pallet_balances::Pallet::<T>::transfer(
-				RawOrigin::Signed(Self::account_id()).into(),
-				Self::account_id(),
-				staker,
-				amount,
-			)?;
+			T::Currency::transfer(&Self::account_id(), &staker, amount, ExistenceRequirement::KeepAlive)?;
 
 			Ok(())
 		}
@@ -349,28 +358,30 @@ pub mod pallet {
 				_ => {},
 			}
 
-			// Apply slashing - simplified for now
-			let slash_percentage = match reason {
-				SlashingReason::DoubleSigning => T::DoubleSignSlashPercentage::get(),
-				SlashingReason::InvalidBlock => T::InvalidBlockSlashPercentage::get(),
-				SlashingReason::Downtime => T::DowntimeSlashPercentage::get(),
-				SlashingReason::Other => 10,
-			};
-
-			let validator_balance = pallet_balances::Pallet::<T>::get(&validator);
-			let slash_amount = (validator_balance * slash_percentage.into()) / 100u32.into();
-
-			pallet_balances::Pallet::<T>::mutate(&validator, |balance| {
-				*balance -= slash_amount;
-			});
-
-			Self::deposit_event(Event::ValidatorSlashed {
-				validator,
-				reason,
-				amount: slash_amount,
-			});
+			apply_slashing::<T>(&validator, reason)?;
 
 			Ok(())
+		}
+	}
+
+	#[pallet::hooks]
+	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
+		fn on_initialize(n: BlockNumberFor<T>) -> Weight {
+			let current_block_number: u32 = n.saturated_into();
+			let mut weight = Weight::from_parts(0, 0);
+
+			// Check for validator downtime every 100 blocks
+			if current_block_number % 100 == 0 {
+				for (validator, _) in ValidatorStakes::<T>::iter() {
+					weight = weight.saturating_add(T::DbWeight::get().reads(1));
+					if let Some(reason) = check_slashing_conditions::<T>(&validator, current_block_number) {
+						let _ = apply_slashing::<T>(&validator, reason);
+						weight = weight.saturating_add(T::DbWeight::get().writes(1));
+					}
+				}
+			}
+
+			weight
 		}
 	}
 
@@ -383,9 +394,7 @@ pub mod pallet {
 
 		/// Get miner for a block
 		fn get_miner_for_block(block_number: u32) -> Result<T::AccountId, Error<T>> {
-			// This would need to be implemented based on how miners are tracked
-			// For now, return a placeholder
-			Err(Error::<T>::BlockNotFound)
+			BlockMiners::<T>::get(block_number).ok_or(Error::<T>::BlockNotFound)
 		}
 	}
 }
