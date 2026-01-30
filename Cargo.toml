@@ -24,9 +24,9 @@ let-underscore = "allow"
 
 [workspace.dependencies]
 # Pin all dependencies to polkadot-sdk version/branch
-clap = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407" }
-futures = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407" }
-jsonrpsee = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407", features = ["server"] }
+clap = { version = "4.5.13", default-features = false }
+futures = { version = "0.3.31", default-features = false }
+jsonrpsee = { version = "0.24.3", default-features = false }
 frame-benchmarking-cli = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407" }
 frame-system-rpc-runtime-api = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407" }
 pallet-transaction-payment-rpc-runtime-api = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407" }
@@ -35,7 +35,7 @@ substrate-frame-rpc-system = { git = "https://github.com/paritytech/polkadot-sdk
 frame-metadata-hash-extension = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407" }
 substrate-build-script-utils = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407" }
 substrate-wasm-builder = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407" }
-serde_json = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407", default-features = false, features = ["alloc"] }
+serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 
 # Polkadot SDK path dependency
 polkadot-sdk = { path = "polkadot-sdk" }

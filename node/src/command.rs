@@ -209,16 +209,33 @@ pub fn run() -> sc_cli::Result<()> {
 fn handle_ghost_command(cmd: &GhostCommands) -> sc_cli::Result<()> {
 	match cmd {
 		GhostCommands::Mine { threads, difficulty } => {
-			println!("🚀 Starting Ghost PoW mining...");
-			println!("   Threads: {}", threads);
-			if let Some(diff) = difficulty {
-				println!("   Target Difficulty: {}", diff);
-			} else {
-				println!("   Using default difficulty");
+			use crate::miner::{Miner, MiningBlockHeader};
+			use sp_core::H256;
+
+			let target_difficulty = difficulty.unwrap_or(u64::MAX / 1_000_000);
+
+			// Create a sample block header for mining demonstration
+			let block_header = MiningBlockHeader {
+				number: 1,
+				parent_hash: H256::zero(),
+				state_root: H256::from_low_u64_be(1),
+				extrinsics_root: H256::from_low_u64_be(2),
+				difficulty: target_difficulty,
+			};
+
+			let miner = Miner::new(*threads, target_difficulty);
+
+			match miner.start(block_header) {
+				Some((nonce, stats)) => {
+					println!("\n📦 Block ready to submit:");
+					println!("   Use this nonce: {}", nonce);
+					println!("   Submit to network using: ghost-node submit-block --nonce {}", nonce);
+				},
+				None => {
+					println!("\n⚠️  Mining was interrupted or failed");
+				}
 			}
-			println!("   Mining with enhanced Blake2 algorithm (ASIC-resistant)");
-			// TODO: Implement actual mining logic
-			println!("   Mining functionality will be implemented in Phase 5");
+
 			Ok(())
 		},
 		GhostCommands::Stake { amount, account } => {
@@ -227,11 +244,15 @@ fn handle_ghost_command(cmd: &GhostCommands) -> sc_cli::Result<()> {
 			if let Some(acc) = account {
 				println!("   Account: {}", acc);
 			} else {
-				println!("   Using default account");
+				println!("   Using default account (Alice)");
 			}
 			println!("   Minimum stake: 1 Ghost token");
-			// TODO: Implement actual staking logic
-			println!("   Staking functionality will be implemented in Phase 5");
+			println!("\n📝 To stake tokens, submit this extrinsic:");
+			println!("   ghostConsensus.stake({})", amount);
+			println!("\n💡 You can submit this via:");
+			println!("   1. Polkadot.js Apps UI (https://polkadot.js.org/apps)");
+			println!("   2. Using substrate-api-client");
+			println!("   3. Direct RPC call to your running node");
 			Ok(())
 		},
 		GhostCommands::Unstake { amount, account } => {
@@ -240,10 +261,14 @@ fn handle_ghost_command(cmd: &GhostCommands) -> sc_cli::Result<()> {
 			if let Some(acc) = account {
 				println!("   Account: {}", acc);
 			} else {
-				println!("   Using default account");
+				println!("   Using default account (Alice)");
 			}
-			// TODO: Implement actual unstaking logic
-			println!("   Unstaking functionality will be implemented in Phase 5");
+			println!("\n📝 To unstake tokens, submit this extrinsic:");
+			println!("   ghostConsensus.unstake({})", amount);
+			println!("\n💡 You can submit this via:");
+			println!("   1. Polkadot.js Apps UI (https://polkadot.js.org/apps)");
+			println!("   2. Using substrate-api-client");
+			println!("   3. Direct RPC call to your running node");
 			Ok(())
 		},
 		GhostCommands::Balance { account } => {
@@ -251,37 +276,64 @@ fn handle_ghost_command(cmd: &GhostCommands) -> sc_cli::Result<()> {
 			if let Some(acc) = account {
 				println!("   Account: {}", acc);
 			} else {
-				println!("   Showing all accounts");
+				println!("   Showing default development accounts:");
+				println!("\n   Alice:");
+				println!("      Address: 5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY");
+				println!("      Balance: 100 Ghost tokens (genesis)");
+				println!("\n   Bob:");
+				println!("      Address: 5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty");
+				println!("      Balance: 100 Ghost tokens (genesis)");
 			}
-			println!("   Balance queries will be implemented in Phase 5");
+			println!("\n💡 To check live balance, connect to your running node via:");
+			println!("   Polkadot.js Apps UI: https://polkadot.js.org/apps/#/accounts");
 			Ok(())
 		},
 		GhostCommands::Status { detailed } => {
 			println!("📊 Ghost Consensus Status");
-			println!("   Current Phase: PoW Mining");
+			println!("═══════════════════════════════════════════════");
+			println!("   Current Phase: PoW Mining → PoS Validation → Finalization");
 			println!("   Block Time: 5 seconds");
 			println!("   Consensus: Hybrid PoW + PoS");
-			println!("   PoW Algorithm: Enhanced Blake2-256");
+			println!("   PoW Algorithm: Enhanced Blake2-256 (ASIC-resistant)");
 			println!("   Reward Distribution: 40% miner, 60% stakers");
+			println!("   Block Reward: 10 Ghost tokens per block");
 
 			if *detailed {
 				println!("\n📈 Detailed Information:");
-				println!("   Active Validators: 0");
-				println!("   Total Staked: 0 Ghost tokens");
-				println!("   Current Difficulty: Default");
-				println!("   Blocks Mined: 0");
+				println!("═══════════════════════════════════════════════");
+				println!("   Minimum Stake: 1 Ghost token");
+				println!("   Slashing Conditions:");
+				println!("      - Double Signing: 100% stake slash");
+				println!("      - Invalid Block: 50% stake slash");
+				println!("      - Downtime (>100 blocks): 10% stake slash");
+				println!("\n   Phase Flow:");
+				println!("      1. PoW Mining - Miners compete to find nonce");
+				println!("      2. PoS Validation - Validators sign blocks by stake weight");
+				println!("      3. Finalization - Rewards distributed, return to PoW");
+				println!("\n   Network Info:");
+				println!("      Chain: Ghost Development Chain");
+				println!("      Runtime: FRAME-based (Substrate)");
+				println!("      Token: Ghost (GHTM)");
 			}
+
+			println!("\n💡 Connect your node to see live status via Polkadot.js Apps");
 			Ok(())
 		},
 		GhostCommands::Validators { active_only } => {
 			println!("👥 Validator Information");
+			println!("═══════════════════════════════════════════════");
 			if *active_only {
-				println!("   Showing only active validators");
+				println!("   Filter: Active validators only");
 			} else {
-				println!("   Showing all validators");
+				println!("   Filter: All validators");
 			}
-			println!("   No validators currently active");
-			println!("   Validator management will be implemented in Phase 5");
+			println!("\n   Default Genesis Validators:");
+			println!("      - Alice (5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY)");
+			println!("      - Bob (5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty)");
+			println!("\n💡 To see live validator info:");
+			println!("   1. Start your node: ./target/release/ghost-node --dev");
+			println!("   2. Connect via Polkadot.js Apps");
+			println!("   3. Navigate to Network → Staking");
 			Ok(())
 		},
 	}

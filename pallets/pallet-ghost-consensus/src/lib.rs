@@ -19,6 +19,7 @@ pub use pallet::*;
 pub mod types;
 pub mod functions;
 pub mod consensus;
+pub mod rpc;
 
 #[cfg(test)]
 mod mock;
@@ -386,6 +387,131 @@ pub mod pallet {
 			// This would need to be implemented based on how miners are tracked
 			// For now, return a placeholder
 			Err(Error::<T>::BlockNotFound)
+		}
+
+		/// Distribute block rewards to miner and stakers
+		pub fn distribute_block_rewards(
+			miner: T::AccountId,
+			block_number: u32,
+		) -> DispatchResult {
+			let total_reward = T::BlockReward::get();
+			let reward = calculate_block_reward::<T>(total_reward);
+
+			// Reward the miner (40%)
+			let _ = pallet_balances::Pallet::<T>::deposit_creating(&miner, reward.miner_reward);
+
+			// Collect all stakers
+			let stakers: Vec<ValidatorStake<T::AccountId, BalanceOf<T>>> = ValidatorStakes::<T>::iter()
+				.map(|(account, stake)| ValidatorStake {
+					account,
+					stake,
+					weight: stake.saturated_into(),
+				})
+				.collect();
+
+			// Distribute to stakers proportionally (60%)
+			if !stakers.is_empty() {
+				let total_stake: BalanceOf<T> = stakers.iter().map(|s| s.stake).sum();
+				if !total_stake.is_zero() {
+					for staker in stakers {
+						let staker_reward = (reward.stakers_reward * staker.stake) / total_stake;
+						let _ = pallet_balances::Pallet::<T>::deposit_creating(&staker.account, staker_reward);
+					}
+				}
+			}
+
+			Self::deposit_event(Event::RewardsDistributed {
+				miner,
+				miner_reward: reward.miner_reward,
+				stakers_reward: reward.stakers_reward,
+			});
+
+			Ok(())
+		}
+
+		/// Check and apply slashing for downtime
+		pub fn check_downtime_slashing() {
+			let current_block = frame_system::Pallet::<T>::block_number().saturated_into::<u32>();
+			let max_downtime = T::MaxDowntimeBlocks::get();
+
+			for (validator, last_active) in LastActiveBlock::<T>::iter() {
+				if current_block.saturating_sub(last_active) > max_downtime {
+					// Apply downtime slashing
+					let slash_percentage = T::DowntimeSlashPercentage::get();
+					if let Some(stake) = ValidatorStakes::<T>::get(&validator) {
+						let slash_amount = (stake * slash_percentage.into()) / 100u32.into();
+						let new_stake = stake.saturating_sub(slash_amount);
+						ValidatorStakes::<T>::insert(&validator, new_stake);
+
+						// Record slashing
+						let mut records = SlashingRecords::<T>::get();
+						records.push((
+							validator.clone(),
+							SlashingReason::Downtime,
+							slash_amount,
+							frame_system::Pallet::<T>::block_number(),
+						));
+						SlashingRecords::<T>::put(records);
+
+						Self::deposit_event(Event::ValidatorSlashed {
+							validator,
+							reason: SlashingReason::Downtime,
+							amount: slash_amount,
+						});
+					}
+				}
+			}
+		}
+
+		/// Adjust difficulty based on block time
+		pub fn adjust_difficulty() {
+			let current_difficulty = Difficulty::<T>::get();
+			let target_block_time = 5u64; // 5 seconds
+
+			// In a real implementation, calculate actual block time from recent blocks
+			// For now, use a simple adjustment
+			let actual_block_time = 5u64; // Placeholder
+
+			let new_difficulty = calculate_difficulty_adjustment::<T>(
+				current_difficulty,
+				actual_block_time,
+				target_block_time,
+			);
+
+			if new_difficulty != current_difficulty {
+				Difficulty::<T>::put(new_difficulty);
+				Self::deposit_event(Event::DifficultyAdjusted {
+					old_difficulty: current_difficulty,
+					new_difficulty,
+				});
+			}
+		}
+	}
+
+	/// Hooks for automatic behavior
+	#[pallet::hooks]
+	impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
+		/// Called at the beginning of each block
+		fn on_initialize(n: BlockNumberFor<T>) -> Weight {
+			// Check for downtime slashing every 10 blocks
+			if (n % 10u32.into()).is_zero() {
+				Self::check_downtime_slashing();
+			}
+
+			// Adjust difficulty every 100 blocks
+			if (n % 100u32.into()).is_zero() {
+				Self::adjust_difficulty();
+			}
+
+			Weight::from_parts(10_000, 0)
+		}
+
+		/// Called at the end of each block
+		fn on_finalize(_n: BlockNumberFor<T>) {
+			// Transition back to PoW mining phase for next block
+			if CurrentPhase::<T>::get() == ConsensusPhase::Finalization {
+				CurrentPhase::<T>::put(ConsensusPhase::PowMining);
+			}
 		}
 	}
 }

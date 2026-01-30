@@ -18,9 +18,9 @@ targets = ["x86_64-unknown-linux-gnu"]
 workspace = true
 
 [dependencies]
-clap = { version = "4.5.13", features = ["derive"] }
-futures = { version = "0.3.31", features = ["thread-pool"] }
-jsonrpsee = { version = "0.24.3", features = ["server"] }
+clap = { workspace = true, features = ["derive"] }
+futures = { workspace = true, features = ["thread-pool"] }
+jsonrpsee = { workspace = true, features = ["server"] }
 
 # substrate client
 sc-basic-authorship = { workspace = true, default-features = true }

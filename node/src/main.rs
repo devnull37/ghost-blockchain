@@ -5,6 +5,7 @@ mod benchmarking;
 mod chain_spec;
 mod cli;
 mod command;
+mod miner;
 mod rpc;
 mod service;
 

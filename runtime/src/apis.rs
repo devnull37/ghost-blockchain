@@ -301,4 +301,32 @@ impl_runtime_apis! {
 			crate::genesis_config_presets::preset_names()
 		}
 	}
+
+	impl pallet_ghost_consensus::rpc::GhostConsensusRuntimeApi<Block, AccountId, Balance> for Runtime {
+		fn get_difficulty() -> u64 {
+			pallet_ghost_consensus::Difficulty::<Runtime>::get()
+		}
+
+		fn get_current_phase() -> u8 {
+			use pallet_ghost_consensus::types::ConsensusPhase;
+			match pallet_ghost_consensus::CurrentPhase::<Runtime>::get() {
+				ConsensusPhase::PowMining => 0,
+				ConsensusPhase::PosValidation => 1,
+				ConsensusPhase::Finalization => 2,
+			}
+		}
+
+		fn get_validator_stake(validator: AccountId) -> Option<Balance> {
+			pallet_ghost_consensus::ValidatorStakes::<Runtime>::get(validator)
+		}
+
+		fn get_all_validators() -> Vec<(AccountId, Balance)> {
+			pallet_ghost_consensus::ValidatorStakes::<Runtime>::iter()
+				.collect()
+		}
+
+		fn get_slashing_records_count() -> u32 {
+			pallet_ghost_consensus::SlashingRecords::<Runtime>::get().len() as u32
+		}
+	}
 }
