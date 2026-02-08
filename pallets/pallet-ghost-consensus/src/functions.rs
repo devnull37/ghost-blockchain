@@ -5,8 +5,7 @@ use crate::types::*;
 use frame_support::pallet_prelude::*;
 use sp_core::H256;
 use sp_runtime::traits::{BlakeTwo256, Hash, SaturatedConversion};
-use sp_std::collections::btree_map::BTreeMap;
-use sp_std::prelude::*;
+use std::collections::BTreeMap;
 
 /// Calculate mining difficulty adjustment
 pub fn calculate_difficulty_adjustment<T: Config>(
@@ -294,7 +293,7 @@ pub fn verify_pqc_signature(
 	#[cfg(feature = "std")]
 	{
 		use pqcrypto_dilithium::dilithium5::*;
-		use pqcrypto_traits::sign::{PublicKey, Signature, Verifier};
+		use pqcrypto_traits::sign::{DetachedSignature as _, PublicKey as _};
 
 		if let (Ok(sig), Ok(pk)) = (
 			DetachedSignature::from_bytes(signature_bytes),

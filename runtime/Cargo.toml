@@ -70,6 +70,7 @@ substrate-wasm-builder = { optional = true, workspace = true, default-features =
 
 [features]
 default = ["std"]
+metadata-hash = ["std"]
 std = [
     "codec/std",
     "frame-executive/std",
