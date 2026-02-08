@@ -263,7 +263,7 @@ fn integer_log2_scaled(x: u64) -> u64 {
 
 /// Check for slashing conditions
 pub fn check_slashing_conditions<T: Config>(
-	validator: T::AccountId,
+	_validator: T::AccountId,
 ) -> Option<SlashingReason> {
 	// This function would need access to storage, so it's better implemented in the pallet
 	// For now, return None
@@ -272,8 +272,8 @@ pub fn check_slashing_conditions<T: Config>(
 
 /// Apply slashing
 pub fn apply_slashing<T: Config>(
-	validator: T::AccountId,
-	reason: SlashingReason,
+	_validator: T::AccountId,
+	_reason: SlashingReason,
 ) -> DispatchResult {
 	// This function should be implemented in the pallet where storage access is available
 	// For now, just return Ok
