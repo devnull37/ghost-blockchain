@@ -2,10 +2,10 @@
 
 use super::*;
 use crate::types::*;
-use frame_support::pallet_prelude::*;
+use frame_support::{pallet_prelude::*, traits::Currency};
 use sp_core::H256;
-use sp_runtime::traits::{BlakeTwo256, Hash, SaturatedConversion};
-use std::collections::BTreeMap;
+use sp_runtime::traits::{BlakeTwo256, Hash, SaturatedConversion, Zero};
+use sp_runtime::sp_std::collections::btree_map::BTreeMap;
 
 /// Calculate mining difficulty adjustment
 pub fn calculate_difficulty_adjustment<T: Config>(
@@ -188,18 +188,14 @@ pub fn distribute_rewards<T: Config>(
 	reward: BlockReward<BalanceOf<T>>,
 ) -> DispatchResult {
 	// Reward the miner
-	pallet_balances::Pallet::<T>::mutate(&miner, |balance| {
-		*balance += reward.miner_reward;
-	});
+	let _ = pallet_balances::Pallet::<T>::deposit_creating(&miner, reward.miner_reward);
 
 	// Distribute to stakers proportionally
-	let total_stake: BalanceOf<T> = stakers.iter().map(|s| s.stake).sum();
+	let total_stake: BalanceOf<T> = stakers.iter().fold(Zero::zero(), |acc, s| acc + s.stake);
 	if !total_stake.is_zero() {
 		for staker in stakers {
 			let staker_reward = (reward.stakers_reward * staker.stake) / total_stake;
-			pallet_balances::Pallet::<T>::mutate(&staker.account, |balance| {
-				*balance += staker_reward;
-			});
+			let _ = pallet_balances::Pallet::<T>::deposit_creating(&staker.account, staker_reward);
 		}
 	}
 
@@ -292,7 +288,7 @@ pub fn verify_pqc_signature(
 ) -> bool {
 	#[cfg(feature = "std")]
 	{
-		use pqcrypto_dilithium::dilithium5::*;
+		use pqcrypto_dilithium::dilithium5::{verify_detached_signature, DetachedSignature, PublicKey};
 		use pqcrypto_traits::sign::{DetachedSignature as _, PublicKey as _};
 
 		if let (Ok(sig), Ok(pk)) = (

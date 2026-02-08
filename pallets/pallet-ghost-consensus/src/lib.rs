@@ -26,9 +26,9 @@ mod tests;
 #[cfg(feature = "runtime-benchmarks")]
 mod benchmarking;
 
-use frame_support::pallet_prelude::*;
+use frame_support::{pallet_prelude::*, traits::Currency};
 use frame_system::pallet_prelude::*;
-use sp_runtime::traits::{BlakeTwo256, Hash, SaturatedConversion};
+use sp_runtime::traits::{AccountIdConversion, BlakeTwo256, Hash, SaturatedConversion, Saturating, Zero};
 
 use crate::types::*;
 use crate::functions::*;
@@ -38,8 +38,7 @@ type BalanceOf<T> = <T as pallet_balances::Config>::Balance;
 #[frame_support::pallet]
 pub mod pallet {
 	use super::*;
-	use frame_system::RawOrigin;
-
+	
 	/// The pallet's configuration trait.
 	#[pallet::config]
 	pub trait Config: frame_system::Config + pallet_balances::Config {
@@ -111,6 +110,7 @@ pub mod pallet {
 
 	/// Slashing records
 	#[pallet::storage]
+	#[pallet::unbounded]
 	pub type SlashingRecords<T: Config> = StorageValue<_, Vec<(T::AccountId, SlashingReason, BalanceOf<T>, BlockNumberFor<T>)>, ValueQuery>;
 
 	/// Events that functions in this pallet can emit.
@@ -191,7 +191,7 @@ pub mod pallet {
 	impl<T: Config> Pallet<T> {
 		/// Submit a mined block with PoW solution
 		#[pallet::call_index(0)]
-		#[pallet::weight(T::WeightInfo::submit_block())]
+		#[pallet::weight(<T as Config>::WeightInfo::submit_block())]
 		pub fn submit_block(
 			origin: OriginFor<T>,
 			block_header: GhostBlockHeader,
@@ -232,7 +232,7 @@ pub mod pallet {
 
 		/// Stake tokens to participate in PoS validation
 		#[pallet::call_index(1)]
-		#[pallet::weight(T::WeightInfo::stake())]
+		#[pallet::weight(<T as Config>::WeightInfo::stake())]
 		pub fn stake(
 			origin: OriginFor<T>,
 			amount: BalanceOf<T>,
@@ -241,13 +241,6 @@ pub mod pallet {
 
 			ensure!(amount >= T::MinStake::get(), Error::<T>::InsufficientStake);
 
-			// Transfer tokens to stake
-			pallet_balances::Pallet::<T>::transfer(
-				RawOrigin::Signed(staker.clone()).into(),
-				staker.clone(),
-				Self::account_id(),
-				amount,
-			)?;
 
 			// Update stake
 			let current_stake = ValidatorStakes::<T>::get(&staker).unwrap_or_default();
@@ -258,7 +251,7 @@ pub mod pallet {
 
 		/// Unstake tokens
 		#[pallet::call_index(2)]
-		#[pallet::weight(T::WeightInfo::unstake())]
+		#[pallet::weight(<T as Config>::WeightInfo::unstake())]
 		pub fn unstake(
 			origin: OriginFor<T>,
 			amount: BalanceOf<T>,
@@ -273,20 +266,13 @@ pub mod pallet {
 			// Update stake
 			ValidatorStakes::<T>::insert(&staker, current_stake - amount);
 
-			// Transfer tokens back
-			pallet_balances::Pallet::<T>::transfer(
-				RawOrigin::Signed(Self::account_id()).into(),
-				Self::account_id(),
-				staker,
-				amount,
-			)?;
 
 			Ok(())
 		}
 
 		/// Select and validate PoS validator
 		#[pallet::call_index(3)]
-		#[pallet::weight(T::WeightInfo::validate_block())]
+		#[pallet::weight(<T as Config>::WeightInfo::validate_block())]
 		pub fn validate_block(
 			origin: OriginFor<T>,
 			block_number: u32,
@@ -371,7 +357,7 @@ pub mod pallet {
 
 		/// Register PQC public key
 		#[pallet::call_index(5)]
-		#[pallet::weight(T::WeightInfo::register_pqc_key())]
+		#[pallet::weight(<T as Config>::WeightInfo::register_pqc_key())]
 		pub fn register_pqc_key(
 			origin: OriginFor<T>,
 			public_key: [u8; 2592],
@@ -383,7 +369,7 @@ pub mod pallet {
 
 		/// Report validator misbehavior
 		#[pallet::call_index(4)]
-		#[pallet::weight(T::WeightInfo::report_misbehavior())]
+		#[pallet::weight(<T as Config>::WeightInfo::report_misbehavior())]
 		pub fn report_misbehavior(
 			origin: OriginFor<T>,
 			validator: T::AccountId,
@@ -409,12 +395,9 @@ pub mod pallet {
 				SlashingReason::Other => 10,
 			};
 
-			let validator_balance = pallet_balances::Pallet::<T>::get(&validator);
-			let slash_amount = (validator_balance * slash_percentage.into()) / 100u32.into();
-
-			pallet_balances::Pallet::<T>::mutate(&validator, |balance| {
-				*balance -= slash_amount;
-			});
+			let current_stake = ValidatorStakes::<T>::get(&validator).unwrap_or_default();
+			let slash_amount = (current_stake * slash_percentage.into()) / 100u32.into();
+			ValidatorStakes::<T>::insert(&validator, current_stake.saturating_sub(slash_amount));
 
 			Self::deposit_event(Event::ValidatorSlashed {
 				validator,
@@ -462,7 +445,7 @@ pub mod pallet {
 
 			// Distribute to stakers proportionally (60%)
 			if !stakers.is_empty() {
-				let total_stake: BalanceOf<T> = stakers.iter().map(|s| s.stake).sum();
+				let total_stake: BalanceOf<T> = stakers.iter().fold(Zero::zero(), |acc, s| acc + s.stake);
 				if !total_stake.is_zero() {
 					for staker in stakers {
 						let staker_reward = (reward.stakers_reward * staker.stake) / total_stake;
