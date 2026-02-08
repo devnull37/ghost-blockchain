@@ -28,7 +28,7 @@ mod benchmarking;
 
 use frame_support::{pallet_prelude::*, traits::Currency};
 use frame_system::pallet_prelude::*;
-use sp_runtime::traits::{AccountIdConversion, BlakeTwo256, Hash, SaturatedConversion, Saturating, Zero};
+use sp_runtime::traits::{BlakeTwo256, Hash, SaturatedConversion, Saturating, Zero};
 
 use crate::types::*;
 use crate::functions::*;
@@ -411,13 +411,9 @@ pub mod pallet {
 
 	/// Helper functions
 	impl<T: Config> Pallet<T> {
-		/// Get the pallet's account ID
-		fn account_id() -> T::AccountId {
-			T::PalletId::get().into_account_truncating()
-		}
 
 		/// Get miner for a block
-		fn get_miner_for_block(block_number: u32) -> Result<T::AccountId, Error<T>> {
+		fn get_miner_for_block(_block_number: u32) -> Result<T::AccountId, Error<T>> {
 			// This would need to be implemented based on how miners are tracked
 			// For now, return a placeholder
 			Err(Error::<T>::BlockNotFound)
@@ -426,7 +422,7 @@ pub mod pallet {
 		/// Distribute block rewards to miner and stakers
 		pub fn distribute_block_rewards(
 			miner: T::AccountId,
-			block_number: u32,
+			_block_number: u32,
 		) -> DispatchResult {
 			let total_reward = T::BlockReward::get();
 			let reward = calculate_block_reward::<T>(total_reward);
