@@ -1765,6 +1765,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6add3b8cff394282be81f3fc1a0605db594ed69890078ca6e2cab1c408bcf04"
 
 [[package]]
+name = "dunce"
+version = "1.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92773504d58c093f6de2459af4af33faa518c13451eb8f2b5698ed3d36e7c813"
+
+[[package]]
 name = "dyn-clonable"
 version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5291,11 +5297,9 @@ dependencies = [
  "frame-system",
  "pallet-balances",
  "parity-scale-codec",
- "sc-client-api",
+ "pqcrypto-dilithium",
+ "pqcrypto-traits",
  "scale-info",
- "sp-blockchain",
- "sp-consensus",
- "sp-consensus-pow",
  "sp-core",
  "sp-crypto-hashing",
  "sp-io",
@@ -5872,6 +5876,37 @@ checksum = "85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9"
 dependencies = [
  "zerocopy",
 ]
+
+[[package]]
+name = "pqcrypto-dilithium"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "685de0fa68c6786559d5fcdaa414f0cd68ef3f5d162f61823bd7424cd276726f"
+dependencies = [
+ "cc",
+ "glob",
+ "libc",
+ "pqcrypto-internals",
+ "pqcrypto-traits",
+]
+
+[[package]]
+name = "pqcrypto-internals"
+version = "0.2.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4a326caf27cbf2ac291ca7fd56300497ba9e76a8cc6a7d95b7a18b57f22b61d"
+dependencies = [
+ "cc",
+ "dunce",
+ "getrandom 0.3.4",
+ "libc",
+]
+
+[[package]]
+name = "pqcrypto-traits"
+version = "0.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94e851c7654eed9e68d7d27164c454961a616cf8c203d500607ef22c737b51bb"
 
 [[package]]
 name = "predicates"
@@ -8443,17 +8478,6 @@ dependencies = [
  "sp-application-crypto",
  "sp-core",
  "sp-keystore",
- "sp-runtime",
-]
-
-[[package]]
-name = "sp-consensus-pow"
-version = "0.40.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=stable2407#92be93c7cb34d6a2c30639cd17994f589c3cdc60"
-dependencies = [
- "parity-scale-codec",
- "sp-api",
- "sp-core",
  "sp-runtime",
 ]
 

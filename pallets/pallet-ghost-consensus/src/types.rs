@@ -3,7 +3,6 @@
 use codec::{Decode, Encode, MaxEncodedLen};
 use scale_info::TypeInfo;
 use sp_core::H256;
-use sp_runtime::traits::{BlakeTwo256, Hash};
 
 /// Block header for Ghost consensus
 #[derive(Clone, Debug, Eq, PartialEq, Encode, Decode, TypeInfo, MaxEncodedLen)]
@@ -100,6 +99,13 @@ pub enum ConsensusPhase {
 	PosValidation,
 	/// Block finalization phase
 	Finalization,
+}
+
+
+impl Default for ConsensusPhase {
+	fn default() -> Self {
+		Self::PowMining
+	}
 }
 
 /// Block validation status
