@@ -18,8 +18,6 @@ pub use pallet::*;
 
 pub mod types;
 pub mod functions;
-pub mod consensus;
-pub mod rpc;
 
 #[cfg(test)]
 mod mock;
@@ -30,15 +28,17 @@ mod benchmarking;
 
 use frame_support::pallet_prelude::*;
 use frame_system::pallet_prelude::*;
-use sp_core::H256;
 use sp_runtime::traits::{BlakeTwo256, Hash, SaturatedConversion};
 
 use crate::types::*;
 use crate::functions::*;
 
+type BalanceOf<T> = <T as pallet_balances::Config>::Balance;
+
 #[frame_support::pallet]
 pub mod pallet {
 	use super::*;
+	use frame_system::RawOrigin;
 
 	/// The pallet's configuration trait.
 	#[pallet::config]
@@ -83,35 +83,35 @@ pub mod pallet {
 
 	/// Current mining difficulty
 	#[pallet::storage]
-	pub type Difficulty<T> = StorageValue<_, u64, ValueQuery>;
+	pub type Difficulty<T: Config> = StorageValue<_, u64, ValueQuery>;
 
 	/// Current consensus phase
 	#[pallet::storage]
-	pub type CurrentPhase<T> = StorageValue<_, ConsensusPhase, ValueQuery>;
+	pub type CurrentPhase<T: Config> = StorageValue<_, ConsensusPhase, ValueQuery>;
 
 	/// Block headers storage
 	#[pallet::storage]
-	pub type BlockHeaders<T> = StorageMap<_, Blake2_128Concat, u32, GhostBlockHeader>;
+	pub type BlockHeaders<T: Config> = StorageMap<_, Blake2_128Concat, u32, GhostBlockHeader>;
 
 	/// Validator stakes
 	#[pallet::storage]
-	pub type ValidatorStakes<T> = StorageMap<_, Blake2_128Concat, T::AccountId, BalanceOf<T>>;
+	pub type ValidatorStakes<T: Config> = StorageMap<_, Blake2_128Concat, T::AccountId, BalanceOf<T>>;
 
 	/// Last active block for validators
 	#[pallet::storage]
-	pub type LastActiveBlock<T> = StorageMap<_, Blake2_128Concat, T::AccountId, u32, ValueQuery>;
+	pub type LastActiveBlock<T: Config> = StorageMap<_, Blake2_128Concat, T::AccountId, u32, ValueQuery>;
 
 	/// Double sign reports
 	#[pallet::storage]
-	pub type DoubleSignReports<T> = StorageMap<_, Blake2_128Concat, T::AccountId, bool, ValueQuery>;
+	pub type DoubleSignReports<T: Config> = StorageMap<_, Blake2_128Concat, T::AccountId, bool, ValueQuery>;
 
 	/// Invalid block reports
 	#[pallet::storage]
-	pub type InvalidBlockReports<T> = StorageMap<_, Blake2_128Concat, T::AccountId, bool, ValueQuery>;
+	pub type InvalidBlockReports<T: Config> = StorageMap<_, Blake2_128Concat, T::AccountId, bool, ValueQuery>;
 
 	/// Slashing records
 	#[pallet::storage]
-	pub type SlashingRecords<T> = StorageValue<_, Vec<(T::AccountId, SlashingReason, BalanceOf<T>, BlockNumberFor<T>)>, ValueQuery>;
+	pub type SlashingRecords<T: Config> = StorageValue<_, Vec<(T::AccountId, SlashingReason, BalanceOf<T>, BlockNumberFor<T>)>, ValueQuery>;
 
 	/// Events that functions in this pallet can emit.
 	#[pallet::event]
