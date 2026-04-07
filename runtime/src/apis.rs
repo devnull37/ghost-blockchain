@@ -23,7 +23,6 @@
 //
 // For more information, please refer to <http://unlicense.org>
 
-// External crates imports
 use alloc::vec::Vec;
 use frame_support::{
 	genesis_builder_helper::{build_state, get_preset},
@@ -40,7 +39,6 @@ use sp_runtime::{
 };
 use sp_version::RuntimeVersion;
 
-// Local module imports
 use super::{
 	AccountId, Aura, Balance, Block, Executive, Grandpa, InherentDataExt, Nonce, Runtime,
 	RuntimeCall, RuntimeGenesisConfig, SessionKeys, System, TransactionPayment, VERSION,
@@ -163,9 +161,6 @@ impl_runtime_apis! {
 			_set_id: sp_consensus_grandpa::SetId,
 			_authority_id: GrandpaId,
 		) -> Option<sp_consensus_grandpa::OpaqueKeyOwnershipProof> {
-			// NOTE: this is the only implementation possible since we've
-			// defined our key owner proof type as a bottom type (i.e. a type
-			// with no values).
 			None
 		}
 	}
@@ -226,11 +221,11 @@ impl_runtime_apis! {
 			Vec<frame_benchmarking::BenchmarkList>,
 			Vec<frame_support::traits::StorageInfo>,
 		) {
+			use baseline::Pallet as BaselineBench;
 			use frame_benchmarking::{baseline, BenchmarkList};
 			use frame_support::traits::StorageInfoTrait;
-			use frame_system_benchmarking::Pallet as SystemBench;
 			use frame_system_benchmarking::extensions::Pallet as SystemExtensionsBench;
-			use baseline::Pallet as BaselineBench;
+			use frame_system_benchmarking::Pallet as SystemBench;
 			use super::*;
 
 			let mut list = Vec::<BenchmarkList>::new();
@@ -245,17 +240,17 @@ impl_runtime_apis! {
 		fn dispatch_benchmark(
 			config: frame_benchmarking::BenchmarkConfig
 		) -> Result<Vec<frame_benchmarking::BenchmarkBatch>, alloc::string::String> {
-			use frame_benchmarking::{baseline, BenchmarkBatch};
-			use sp_storage::TrackedStorageKey;
-			use frame_system_benchmarking::Pallet as SystemBench;
-			use frame_system_benchmarking::extensions::Pallet as SystemExtensionsBench;
 			use baseline::Pallet as BaselineBench;
+			use frame_benchmarking::{baseline, BenchmarkBatch};
+			use frame_support::traits::WhitelistedStorageKeys;
+			use frame_system_benchmarking::extensions::Pallet as SystemExtensionsBench;
+			use frame_system_benchmarking::Pallet as SystemBench;
+			use sp_storage::TrackedStorageKey;
 			use super::*;
 
 			impl frame_system_benchmarking::Config for Runtime {}
 			impl baseline::Config for Runtime {}
 
-			use frame_support::traits::WhitelistedStorageKeys;
 			let whitelist: Vec<TrackedStorageKey> = AllPalletsWithSystem::whitelisted_storage_keys();
 
 			let mut batches = Vec::<BenchmarkBatch>::new();
@@ -269,9 +264,6 @@ impl_runtime_apis! {
 	#[cfg(feature = "try-runtime")]
 	impl frame_try_runtime::TryRuntime<Block> for Runtime {
 		fn on_runtime_upgrade(checks: frame_try_runtime::UpgradeCheckSelect) -> (Weight, Weight) {
-			// NOTE: intentional unwrap: we don't want to propagate the error backwards, and want to
-			// have a backtrace here. If any of the pre/post migration checks fail, we shall stop
-			// right here and right now.
 			let weight = Executive::try_runtime_upgrade(checks).unwrap();
 			(weight, super::configs::RuntimeBlockWeights::get().max_block)
 		}
@@ -282,9 +274,8 @@ impl_runtime_apis! {
 			signature_check: bool,
 			select: frame_try_runtime::TryStateSelect
 		) -> Weight {
-			// NOTE: intentional unwrap: we don't want to propagate the error backwards, and want to
-			// have a backtrace here.
-			Executive::try_execute_block(block, state_root_check, signature_check, select).expect("execute-block failed")
+			Executive::try_execute_block(block, state_root_check, signature_check, select)
+				.expect("execute-block failed")
 		}
 	}
 
@@ -299,34 +290,6 @@ impl_runtime_apis! {
 
 		fn preset_names() -> Vec<sp_genesis_builder::PresetId> {
 			crate::genesis_config_presets::preset_names()
-		}
-	}
-
-	impl pallet_ghost_consensus::rpc::GhostConsensusRuntimeApi<Block, AccountId, Balance> for Runtime {
-		fn get_difficulty() -> u64 {
-			pallet_ghost_consensus::Difficulty::<Runtime>::get()
-		}
-
-		fn get_current_phase() -> u8 {
-			use pallet_ghost_consensus::types::ConsensusPhase;
-			match pallet_ghost_consensus::CurrentPhase::<Runtime>::get() {
-				ConsensusPhase::PowMining => 0,
-				ConsensusPhase::PosValidation => 1,
-				ConsensusPhase::Finalization => 2,
-			}
-		}
-
-		fn get_validator_stake(validator: AccountId) -> Option<Balance> {
-			pallet_ghost_consensus::ValidatorStakes::<Runtime>::get(validator)
-		}
-
-		fn get_all_validators() -> Vec<(AccountId, Balance)> {
-			pallet_ghost_consensus::ValidatorStakes::<Runtime>::iter()
-				.collect()
-		}
-
-		fn get_slashing_records_count() -> u32 {
-			pallet_ghost_consensus::SlashingRecords::<Runtime>::get().len() as u32
 		}
 	}
 }

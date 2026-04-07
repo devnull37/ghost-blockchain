@@ -20,7 +20,7 @@ impl SubstrateCli for Cli {
 	}
 
 	fn description() -> String {
-		"Ghost blockchain node with hybrid PoW + PoS consensus".into()
+		"Ghost blockchain node with an experimental Ghost consensus pallet".into()
 	}
 
 	fn author() -> String {
@@ -28,7 +28,7 @@ impl SubstrateCli for Cli {
 	}
 
 	fn support_url() -> String {
-		"https://github.com/CoolCreator247/ghost-blockchain".into()
+		"https://github.com/devnull37/ghost-blockchain".into()
 	}
 
 	fn copyright_start_year() -> i32 {
@@ -289,24 +289,30 @@ fn handle_ghost_command(cmd: &GhostCommands) -> sc_cli::Result<()> {
 			Ok(())
 		},
 		GhostCommands::Status { detailed } => {
-			println!("📊 Ghost Consensus Status");
-			println!("═══════════════════════════════════════════════");
-			println!("   Current Phase: PoW Mining → PoS Validation → Finalization");
+			println!("Ghost Consensus Status");
+			println!("===============================================");
+			println!("   Node block production: Aura");
+			println!("   Node finality: GRANDPA");
+			println!("   Experimental pallet flow: PoW Mining -> PoS Validation -> Finalization");
 			println!("   Block Time: 5 seconds");
-			println!("   Consensus: Hybrid PoW + PoS");
+			println!("   Runtime pallet: ghostConsensus");
 			println!("   PoW Algorithm: Enhanced Blake2-256 (ASIC-resistant)");
 			println!("   Reward Distribution: 40% miner, 60% stakers");
 			println!("   Block Reward: 10 Ghost tokens per block");
+			println!("   Quantum encryption: not implemented");
 
 			if *detailed {
-				println!("\n📈 Detailed Information:");
-				println!("═══════════════════════════════════════════════");
+				println!("\nDetailed Information:");
+				println!("===============================================");
 				println!("   Minimum Stake: 1 Ghost token");
 				println!("   Slashing Conditions:");
-				println!("      - Double Signing: 100% stake slash");
-				println!("      - Invalid Block: 50% stake slash");
+				println!("      - Double Signing: configured slash");
+				println!("      - Invalid Block: configured slash");
 				println!("      - Downtime (>100 blocks): 10% stake slash");
-				println!("\n   Phase Flow:");
+				println!("\n   Important Caveat:");
+				println!("      - Live blocks are still authored by Aura and finalized by GRANDPA.");
+				println!("      - The Ghost pallet is validated with unit tests, not wired into node authoring.");
+				println!("\n   Pallet Flow:");
 				println!("      1. PoW Mining - Miners compete to find nonce");
 				println!("      2. PoS Validation - Validators sign blocks by stake weight");
 				println!("      3. Finalization - Rewards distributed, return to PoW");
@@ -316,7 +322,7 @@ fn handle_ghost_command(cmd: &GhostCommands) -> sc_cli::Result<()> {
 				println!("      Token: Ghost (GHTM)");
 			}
 
-			println!("\n💡 Connect your node to see live status via Polkadot.js Apps");
+			println!("\nConnect your node to inspect live state via Polkadot.js Apps.");
 			Ok(())
 		},
 		GhostCommands::Validators { active_only } => {
@@ -330,10 +336,10 @@ fn handle_ghost_command(cmd: &GhostCommands) -> sc_cli::Result<()> {
 			println!("\n   Default Genesis Validators:");
 			println!("      - Alice (5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY)");
 			println!("      - Bob (5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty)");
-			println!("\n💡 To see live validator info:");
+			println!("\nTo see live validator info:");
 			println!("   1. Start your node: ./target/release/ghost-node --dev");
 			println!("   2. Connect via Polkadot.js Apps");
-			println!("   3. Navigate to Network → Staking");
+			println!("   3. Navigate to the ghostConsensus pallet state");
 			Ok(())
 		},
 	}

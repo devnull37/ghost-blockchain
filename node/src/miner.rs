@@ -47,7 +47,7 @@ impl Miner {
 
 	/// Start mining
 	pub fn start(&self, block_header: MiningBlockHeader) -> Option<(u64, MiningStats)> {
-		println!("🚀 Starting Ghost PoW mining...");
+		println!("Starting Ghost PoW mining...");
 		println!("   Block Number: {}", block_header.number);
 		println!("   Target Difficulty: {}", self.target_difficulty);
 		println!("   Mining Threads: {}", self.threads);
@@ -131,14 +131,14 @@ impl Miner {
 
 		if found_solution.load(Ordering::SeqCst) {
 			let nonce = found_nonce.load(Ordering::SeqCst);
-			println!("\n✅ Block mined successfully!");
+			println!("\nBlock mined successfully.");
 			println!("   Nonce: {}", nonce);
 			println!("   Hashes computed: {}", total_hashes);
 			println!("   Hash rate: {:.2} H/s", hash_rate);
 			println!("   Time elapsed: {:.2}s", elapsed.as_secs_f64());
 			Some((nonce, stats))
 		} else {
-			println!("\n❌ Mining stopped without finding solution");
+			println!("\nMining stopped without finding a solution.");
 			println!("   Hashes computed: {}", total_hashes);
 			println!("   Time elapsed: {:.2}s", elapsed.as_secs_f64());
 			None

@@ -173,7 +173,7 @@ impl pallet_template::Config for Runtime {
 /// Configure the Ghost Consensus pallet
 impl pallet_ghost_consensus::Config for Runtime {
 	type RuntimeEvent = RuntimeEvent;
-	type WeightInfo = pallet_ghost_consensus::weights::SubstrateWeight<Runtime>;
+	type WeightInfo = ();
 	type BlockReward = ConstU128<10_000_000_000_000>; // 10 Ghost tokens per block
 	type MinStake = ConstU128<1_000_000_000_000>; // 1 Ghost token minimum stake
 	type MaxDowntimeBlocks = ConstU32<100>; // Max 100 blocks of downtime

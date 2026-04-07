@@ -10,8 +10,6 @@ use sc_transaction_pool_api::OffchainTransactionPoolFactory;
 use solochain_template_runtime::{self, apis::RuntimeApi, opaque::Block};
 use sp_consensus_aura::sr25519::AuthorityPair as AuraPair;
 
-// Ghost Consensus imports
-use pallet_ghost_consensus::GhostConsensusEngine;
 use std::{sync::Arc, time::Duration};
 
 pub(crate) type FullClient = sc_service::TFullClient<
@@ -280,20 +278,15 @@ pub fn new_full<
 			},
 		)?;
 
-		// the AURA authoring task is considered essential, i.e. if it
-		// fails we take down the service with it.
 		task_manager
 			.spawn_essential_handle()
 			.spawn_blocking("aura", Some("block-authoring"), aura);
 	}
 
 	if enable_grandpa {
-		// if the node isn't actively participating in consensus then it doesn't
-		// need a keystore, regardless of which protocol we use below.
 		let keystore = if role.is_authority() { Some(keystore_container.keystore()) } else { None };
 
 		let grandpa_config = sc_consensus_grandpa::Config {
-			// FIXME #1578 make this available through chainspec
 			gossip_duration: Duration::from_millis(333),
 			justification_generation_period: GRANDPA_JUSTIFICATION_PERIOD,
 			name: Some(name),
@@ -304,12 +297,6 @@ pub fn new_full<
 			protocol_name: grandpa_protocol_name,
 		};
 
-		// start the full GRANDPA voter
-		// NOTE: non-authorities could run the GRANDPA observer protocol, but at
-		// this point the full voter should provide better guarantees of block
-		// and vote data availability than the observer. The observer has not
-		// been tested extensively yet and having most nodes in a network run it
-		// could lead to finality stalls.
 		let grandpa_config = sc_consensus_grandpa::GrandpaParams {
 			config: grandpa_config,
 			link: grandpa_link,
@@ -323,8 +310,6 @@ pub fn new_full<
 			offchain_tx_pool_factory: OffchainTransactionPoolFactory::new(transaction_pool),
 		};
 
-		// the GRANDPA voter task is considered infallible, i.e.
-		// if it fails we take down the service with it.
 		task_manager.spawn_essential_handle().spawn_blocking(
 			"grandpa-voter",
 			None,

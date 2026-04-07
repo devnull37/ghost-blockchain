@@ -106,3 +106,6 @@ scale-info = { version = "2.11.6", default-features = false, features = ["derive
 pallet-template = { path = "pallets/template" }
 pallet-ghost-consensus = { path = "pallets/pallet-ghost-consensus" }
 solochain-template-runtime = { path = "runtime" }
+
+[patch.crates-io]
+proc-macro-error = { path = "vendor/proc-macro-error" }

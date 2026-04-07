@@ -1,7 +1,7 @@
 #[derive(Debug, clap::Parser)]
 #[command(
 	name = "ghost-node",
-	about = "Ghost blockchain node - Hybrid PoW + PoS consensus",
+	about = "Ghost blockchain node with an experimental Ghost consensus pallet",
 	version,
 	author
 )]

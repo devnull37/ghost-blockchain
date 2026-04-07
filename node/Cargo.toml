@@ -1,6 +1,6 @@
 [package]
 name = "ghost-node"
-description = "Ghost blockchain node - Hybrid PoW + PoS consensus for fast, secure, and energy-efficient blockchain."
+description = "Ghost blockchain node with an experimental Ghost consensus pallet."
 version = "0.0.0"
 license = "Unlicense"
 authors = ["Ghost Blockchain Team"]

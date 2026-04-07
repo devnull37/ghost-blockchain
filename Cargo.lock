@@ -5291,13 +5291,8 @@ dependencies = [
  "frame-system",
  "pallet-balances",
  "parity-scale-codec",
- "sc-client-api",
  "scale-info",
- "sp-blockchain",
- "sp-consensus",
- "sp-consensus-pow",
  "sp-core",
- "sp-crypto-hashing",
  "sp-io",
  "sp-runtime",
 ]
@@ -5968,8 +5963,6 @@ dependencies = [
 [[package]]
 name = "proc-macro-error"
 version = "1.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da25490ff9892aab3fcf7c36f08cfb902dd3e71ca0f9f9517bea02a73a5ce38c"
 dependencies = [
  "proc-macro-error-attr",
  "proc-macro2",
@@ -8443,17 +8436,6 @@ dependencies = [
  "sp-application-crypto",
  "sp-core",
  "sp-keystore",
- "sp-runtime",
-]
-
-[[package]]
-name = "sp-consensus-pow"
-version = "0.40.0"
-source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=stable2407#92be93c7cb34d6a2c30639cd17994f589c3cdc60"
-dependencies = [
- "parity-scale-codec",
- "sp-api",
- "sp-core",
  "sp-runtime",
 ]
 
