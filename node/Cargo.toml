@@ -1,6 +1,6 @@
 [package]
 name = "ghost-node"
-description = "Ghost blockchain node - Hybrid PoW + PoS consensus for fast, secure, and energy-efficient blockchain."
+description = "Ghost blockchain node."
 version = "0.0.0"
 license = "Unlicense"
 authors = ["Ghost Blockchain Team"]
@@ -32,6 +32,7 @@ sc-consensus-grandpa = { workspace = true, default-features = true }
 sc-executor = { workspace = true, default-features = true }
 sc-network = { workspace = true, default-features = true }
 sc-offchain = { workspace = true, default-features = true }
+sc-rpc-api = { workspace = true, default-features = true }
 sc-service = { workspace = true, default-features = true }
 sc-telemetry = { workspace = true, default-features = true }
 sc-transaction-pool = { workspace = true, default-features = true }
@@ -62,6 +63,9 @@ frame-benchmarking-cli = { workspace = true, default-features = true }
 
 # Local Dependencies
 solochain-template-runtime = { workspace = true }
+
+[features]
+runtime-benchmarks = ["solochain-template-runtime/runtime-benchmarks"]
 
 [build-dependencies]
 substrate-build-script-utils = { workspace = true, default-features = true }

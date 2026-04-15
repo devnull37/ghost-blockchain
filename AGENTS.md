@@ -1,178 +1,42 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This repository uses `rtk` as the command wrapper for local shell work. Prefer:
 
-## Project Overview
-
-Ghost is a next-generation blockchain built on Substrate (Polkadot SDK) that implements a hybrid Proof-of-Work (PoW) and Proof-of-Stake (PoS) consensus mechanism. It combines PoW security with PoS energy efficiency for 5-second block times.
-
-**Key Specifications:**
-- Block Time: 5 seconds
-- PoW Algorithm: Enhanced Blake2-256 (ASIC-resistant, double-hashed)
-- Token: Ghost (GHTM)
-- Block Reward: 10 GHOST per block (40% to miner, 60% to stakers)
-- Minimum Stake: 1 GHOST token
-- Built on: Polkadot SDK stable2407 branch
-
-## Build Commands
-
-**Prerequisites:**
-- Rust toolchain must be installed via rustup
-- Run `rustup default stable` if cargo is not found
-- The project uses rust-toolchain.toml to configure stable Rust with wasm32-unknown-unknown target
-
-**Build:**
 ```bash
-# Release build (recommended for production)
-cargo build --release --bin ghost-node
-
-# Debug build (faster compilation for development)
-cargo build --bin ghost-node
-
-# Build documentation
-cargo +nightly doc --open
+rtk cargo test -p pallet-ghost-consensus
+rtk scripts/e2e-local.sh
+rtk env \
+  WASM_BUILD_WORKSPACE_HINT=$PWD \
+  LIBCLANG_PATH=/lib/llvm-18/lib \
+  BINDGEN_EXTRA_CLANG_ARGS="-I/usr/lib/gcc/x86_64-linux-gnu/13/include -I/usr/include/x86_64-linux-gnu -I/usr/include" \
+  cargo build --bin ghost-node
 ```
 
-**Testing:**
-```bash
-# Run all tests
-cargo test
+Current build reality:
+- Full embedded-Wasm node builds pass with the documented Substrate C toolchain environment.
+- `scripts/e2e-local.sh` is the repeatable local smoke gate. It builds the node, checks Ghost CLI, boots a dev node, boots Alice/Bob local validators, verifies peering, authoring, GRANDPA finality, and verifies Bob can restart/rejoin/finalize.
+- `clang`/LLVM must be installed locally. On this Ubuntu environment, `LIBCLANG_PATH=/lib/llvm-18/lib` and the include paths in the example above are known-good.
+- `SKIP_WASM_BUILD=1` is still useful for quick native checks, but do not use it to claim node/E2E readiness.
 
-# Run tests for specific pallet
-cargo test -p pallet-ghost-consensus
+Consensus reality:
+- `node/src/service.rs` still authors blocks with Aura and finalizes with GRANDPA.
+- `pallets/pallet-ghost-consensus` contains Ghost PoW/PoS/PQC pallet logic, but it is not yet the node's live block production engine.
+- Do not describe the chain as production hybrid PoW/PoS until the service imports, validates, and authors blocks through the Ghost consensus path.
+- The Aura/GRANDPA local chain can peer, author, finalize, and survive a validator restart.
+- Ghost pallet miner tracking, staking escrow, reward-path tests, and PQC-size fixes exist, but they are still pallet/runtime logic rather than the node's consensus engine.
+- Dilithium5 verification is present for native/std builds. Runtime Wasm/no_std PQC verification is intentionally disabled with `PqcRequired = false` until a deterministic no_std verifier is implemented and benchmarked.
 
-# Run a single test
-cargo test test_name
+Next todos:
+- Design the real Ghost consensus engine before coding broad changes. Document block authoring, import verification, fork choice, PoW seal format, PoS validator-selection timing, finality interaction, equivocation handling, and reward attribution.
+- Replace or extend the Aura authoring path only after the Ghost import queue can reject invalid PoW/PoS blocks deterministically across nodes.
+- Move miner attribution from pallet-only bookkeeping into the live block authoring/import path so rewards cannot be spoofed by extrinsics.
+- Add on-chain reward accounting tests that cover miner rewards, staker rewards, slashing, failed validation, and replay/double-submit attempts.
+- Implement Dilithium5 runtime verification with a no_std/Wasm-safe verifier. Add proof-of-possession to `register_pqc_key`, benchmark weights, and test valid/invalid signatures through runtime APIs.
+- Add restart and persistence coverage for staking state, block-producer history, reward distribution, and slashing records.
+- Keep `scripts/e2e-local.sh` green after every consensus or runtime change; extend it with Ghost-consensus-specific checks once the live engine exists.
+- Before any public testnet claim, run a multi-node long soak with clean base paths, validator restarts, RPC checks, and finalized-head agreement.
 
-# Run tests with output
-cargo test -- --nocapture
-```
-
-**Running the Node:**
-```bash
-# Start development chain
-./target/release/ghost-node --dev
-
-# Start with custom base path
-./target/release/ghost-node --dev --base-path ./ghost-chain-data
-
-# Start with detailed logging
-RUST_BACKTRACE=1 ./target/release/ghost-node -ldebug --dev
-
-# Purge development chain state
-./target/release/ghost-node purge-chain --dev
-```
-
-**Ghost-Specific CLI Commands:**
-```bash
-# Check consensus status
-./target/release/ghost-node ghost status --detailed
-
-# Start mining (when implemented)
-./target/release/ghost-node ghost mine --threads 4
-
-# Stake tokens for validation
-./target/release/ghost-node ghost stake --amount 1000
-
-# Check balance
-./target/release/ghost-node ghost balance
-```
-
-## Architecture
-
-### Workspace Structure
-
-The project is a Cargo workspace with three main components:
-
-**1. Node (`node/`)** - The blockchain client
-- `cli.rs`: CLI structure including Ghost-specific commands (mine, stake, balance, status)
-- `service.rs`: Node service configuration with Ghost consensus engine integration
-- `chain_spec.rs`: Chain specification and genesis configuration (uses Alice/Bob as default validators)
-- `rpc.rs`: RPC endpoint configuration
-
-**2. Runtime (`runtime/`)** - The blockchain's state transition function (STF)
-- `lib.rs`: FRAME runtime configuration with pallet composition
-- `configs/mod.rs`: Pallet configurations
-- Runtime uses 5-second block times (MILLI_SECS_PER_BLOCK = 5000)
-- All pallets are configured via `impl $PALLET_NAME::Config for Runtime` blocks
-- Composed into single runtime via `#[runtime]` macro
-
-**3. Pallets (`pallets/`)** - Modular blockchain logic components
-
-### Ghost Consensus Pallet (`pallets/pallet-ghost-consensus/`)
-
-This is the core innovation of the project. It implements the hybrid PoW+PoS consensus.
-
-**Key Files:**
-- `src/lib.rs`: Main pallet with storage items, events, dispatchables, and hooks
-- `src/types.rs`: Core data structures (GhostBlockHeader, ConsensusPhase, SlashingReason, etc.)
-- `src/functions.rs`: Consensus algorithms (difficulty adjustment, PoW verification, validator selection)
-- `src/consensus.rs`: Consensus engine integration with Substrate
-
-**Storage Items:**
-- `Difficulty<T>`: Current mining difficulty
-- `CurrentPhase<T>`: Current consensus phase (PowMining, PosValidation, Finalization)
-- `BlockHeaders<T>`: Block headers storage
-- `ValidatorStakes<T>`: Validator stake amounts
-- `LastActiveBlock<T>`: Tracks validator activity for slashing
-
-**Consensus Flow:**
-1. **PoW Phase**: Miners compete using enhanced Blake2-256 (double-hashed for ASIC resistance)
-2. **PoS Phase**: Validators selected by weighted stake sign blocks
-3. **Finalization**: Block rewards distributed (40% miner, 60% stakers)
-4. **Slashing**: Penalties for double-signing, invalid blocks, and downtime
-
-**Verification Functions:**
-- `verify_pow()`: Basic Blake2-256 PoW verification
-- `verify_pow_enhanced()`: Double-hashed Blake2-256 (current implementation)
-- `verify_pow_sha256()`: Alternative SHA-256 verification
-
-### Substrate Integration
-
-The project uses Substrate's FRAME (Framework for Runtime Aggregation of Modularized Entities):
-
-- **Pallets**: Self-contained modules with storage, events, errors, and dispatchables
-- **Config Trait**: Each pallet has a Config trait for generic type/parameter configuration
-- **Runtime**: Combines all pallets via macro-based composition
-- **Dependencies**: All Substrate/Polkadot dependencies pinned to stable2407 branch
-
-## Development Notes
-
-**Default Development Accounts:**
-- Chain uses Alice and Bob as default validator authorities
-- Alice is the default sudo account
-- Genesis state includes pre-funded development accounts (see `node/src/chain_spec.rs`)
-
-**Consensus Configuration:**
-- Uses Aura (Authority Round) for block authoring in dev mode
-- Uses GRANDPA for finality
-- Ghost consensus engine layers hybrid PoW+PoS on top
-
-**Important Constants:**
-- `BLOCK_HASH_COUNT`: 2400
-- `GRANDPA_JUSTIFICATION_PERIOD`: 512 blocks
-- Block time constants: `MINUTES`, `HOURS`, `DAYS` based on 5-second blocks
-
-**Linting:**
-- Workspace enforces `unsafe_code = "forbid"`
-- Clippy warnings enabled for absolute paths, redundant lifetimes, and explicit outlives
-
-## Testing with Polkadot-JS Apps
-
-Connect to local node: https://polkadot.js.org/apps/#/explorer?rpc=ws://localhost:9944
-
-Source code for hosting your own: https://github.com/polkadot-js/apps
-
-## Multi-Node Testing
-
-For testing consensus across multiple nodes, see Substrate docs on simulating networks:
-https://docs.substrate.io/tutorials/build-a-blockchain/simulate-network/
-
-## Common Issues
-
-If you encounter "rustup could not choose a version of cargo":
-```bash
-rustup default stable
-```
-
-The project expects Rust stable toolchain with wasm32-unknown-unknown target (configured in `env-setup/rust-toolchain.toml`).
+Docs ownership:
+- Keep `README.md`, `IMPLEMENTATION_SUMMARY.md`, and `docs/*` aligned with the current branch state.
+- Put launch-readiness notes in `docs/testnet-readiness.md` and keep them tied to the actual code path, not the aspirational design.
+- When writing readiness language, distinguish Aura/GRANDPA local smoke readiness from live Ghost PoW/PoS consensus readiness.

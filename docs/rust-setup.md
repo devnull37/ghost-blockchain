@@ -2,6 +2,8 @@
 
 This guide is for reference only, please check the latest information on getting started with Substrate [here](https://docs.substrate.io/main-docs/install/).
 
+For Ghost specifically, prefer the repository guidance in `AGENTS.md` and use the `rtk` commands documented there. The current branch can build the embedded-Wasm node when the local Substrate C toolchain is installed. On Ubuntu, `clang`/LLVM and the include paths shown in `docs/testnet-readiness.md` are enough for the local smoke test.
+
 This page will guide you through the **2 steps** needed to prepare a computer for **Substrate** development. Since
 Substrate is built with [the Rust programming language](https://www.rust-lang.org/), the first thing you will need to do
 is prepare the computer for Rust development - these steps will vary based on the computer's operating system. Once Rust
