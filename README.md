@@ -69,14 +69,20 @@ cargo run --bin ghost-node -- ghost stake --amount 3000000000000
 cargo run --bin ghost-node -- ghost unstake --amount 1000000000000
 cargo run --bin ghost-node -- ghost transfer --to //Bob --amount 5000000000000
 
+# Post-quantum: generate an ML-DSA-87 (FIPS 204) keypair, then register it on-chain so
+# the signer's validator attestations are checked against it.
+cargo run --bin ghost-node -- ghost pq-keygen --out my-validator-key
+cargo run --bin ghost-node -- ghost register-key --key my-validator-key.pub
+
 # Local PoW benchmark demo (runs the real work function; does NOT submit to the chain)
 cargo run --bin ghost-node -- ghost mine --threads 2
 ```
 
 `balance`/`validators` decode `System.Account` and `GhostConsensus.ValidatorStakes` from
-state; `stake`/`unstake`/`transfer` build, sign, and submit via `author_submitExtrinsic`.
-ML-DSA validator-key registration (`register_ml_dsa_key`) is still submitted via Polkadot.js
-/ RPC (a CLI keygen + register flow is a planned follow-up).
+state (`validators` also reports each validator's ML-DSA key status); `stake`/`unstake`/
+`transfer`/`register-key` build, sign, and submit via `author_submitExtrinsic`. `pq-keygen`
+writes a real ML-DSA-87 keypair (`<out>.pub` 2592 bytes / `<out>.sec` 4896 bytes; keep the
+secret file safe).
 
 ## Important Paths
 

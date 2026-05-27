@@ -360,5 +360,17 @@ fn handle_ghost_command(cmd: &GhostCommands) -> sc_cli::Result<()> {
             active_only: _,
             rpc_url,
         } => crate::wallet::list_validators(rpc_url.as_deref()).map_err(sc_cli::Error::Input),
+        GhostCommands::PqKeygen { out } => {
+            crate::wallet::generate_ml_dsa_key(out).map_err(sc_cli::Error::Input)
+        }
+        GhostCommands::RegisterKey {
+            key,
+            account,
+            rpc_url,
+        } => {
+            let suri = account.as_deref().unwrap_or(crate::wallet::DEFAULT_SURI);
+            crate::wallet::register_ml_dsa_key(key, suri, rpc_url.as_deref())
+                .map_err(sc_cli::Error::Input)
+        }
     }
 }

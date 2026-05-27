@@ -10,3 +10,7 @@
 *.tmp
 Thumbs.db
 .DS_Store
+
+# Generated ML-DSA keypairs from `ghost pq-keygen` (never commit secret keys)
+*.sec
+*.pub

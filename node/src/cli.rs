@@ -153,4 +153,28 @@ pub enum GhostCommands {
         #[arg(long)]
         rpc_url: Option<String>,
     },
+
+    /// Generate an ML-DSA-87 (FIPS 204) keypair to <out>.pub and <out>.sec
+    #[command(name = "pq-keygen")]
+    PqKeygen {
+        /// Output path prefix (writes <out>.pub and <out>.sec)
+        #[arg(long, default_value = "ghost-mldsa")]
+        out: String,
+    },
+
+    /// Register an ML-DSA-87 public key on-chain (signs + submits to a running node)
+    #[command(name = "register-key")]
+    RegisterKey {
+        /// Path to the 2592-byte ML-DSA-87 public key file (from `pq-keygen`)
+        #[arg(long)]
+        key: String,
+
+        /// Signer secret URI / dev seed (e.g. //Alice). Defaults to //Alice.
+        #[arg(long)]
+        account: Option<String>,
+
+        /// Node JSON-RPC endpoint. Defaults to http://127.0.0.1:9944.
+        #[arg(long)]
+        rpc_url: Option<String>,
+    },
 }

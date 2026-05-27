@@ -23,6 +23,9 @@ codec = { workspace = true, default-features = true, features = ["derive"] }
 # Post-quantum encryption (node-side): ML-KEM-1024 (FIPS 203) + ChaCha20-Poly1305 AEAD.
 fips203 = { version = "0.4.3", default-features = false, features = ["ml-kem-1024", "default-rng"] }
 chacha20poly1305 = { version = "0.10" }
+# ML-DSA-87 (FIPS 204) keygen for the CLI `pq-keygen` helper (native binary only; the
+# no_std Wasm runtime builds fips204 separately, without `default-rng`).
+fips204 = { version = "0.4.6", default-features = false, features = ["ml-dsa-87", "default-rng"] }
 futures = { workspace = true, features = ["thread-pool"] }
 futures-timer = "3.0.3"
 jsonrpsee = { workspace = true, features = ["server", "http-client"] }

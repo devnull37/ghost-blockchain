@@ -12,6 +12,7 @@
 //! matches a node run without the `metadata-hash` feature.
 
 use codec::{Decode, Encode};
+use fips204::{ml_dsa_87, traits::SerDes};
 use jsonrpsee::core::client::ClientT;
 use jsonrpsee::http_client::{HttpClient, HttpClientBuilder};
 use jsonrpsee::rpc_params;
@@ -257,7 +258,16 @@ pub fn list_validators(rpc: Option<&str>) -> Result<(), String> {
                 Some(b) => Balance::decode(&mut &b[..]).unwrap_or(0),
                 None => 0,
             };
-            println!("  {}  stake {}", acc.to_ss58check(), stake);
+            // Does this validator have a registered ML-DSA-87 attestation key?
+            let pq_key = blake2_map_key("GhostConsensus", "ValidatorMlDsaKey", &acc.encode());
+            let pq = match rpc_get_storage(&c, &pq_key).await? {
+                Some(b) => match Vec::<u8>::decode(&mut &b[..]) {
+                    Ok(v) => format!("ML-DSA-87 key registered ({} bytes)", v.len()),
+                    Err(_) => "ML-DSA-87 key registered".to_string(),
+                },
+                None => "no PQ key".to_string(),
+            };
+            println!("  {}  stake {}  [{}]", acc.to_ss58check(), stake, pq);
         }
         Ok(())
     })
@@ -306,4 +316,49 @@ pub fn transfer(dest: &str, amount: u128, suri: &str, rpc: Option<&str>) -> Resu
         rpc,
         &format!("transfer({amount}) to {}", dest_acc.to_ss58check()),
     )
+}
+
+/// Generate an ML-DSA-87 (FIPS 204 / "Dilithium-5") keypair and write it to
+/// `<out>.pub` (2592 bytes) and `<out>.sec` (4896 bytes).
+pub fn generate_ml_dsa_key(out_prefix: &str) -> Result<(), String> {
+    // ML-DSA-87 keygen expands a large matrix in big stack buffers, which can overflow the
+    // main thread's stack. Run it on a worker thread with a generous stack.
+    let (pk, sk) = std::thread::Builder::new()
+        .stack_size(16 * 1024 * 1024)
+        .spawn(ml_dsa_87::try_keygen)
+        .map_err(|e| format!("failed to spawn keygen thread: {e}"))?
+        .join()
+        .map_err(|_| "keygen thread panicked".to_string())?
+        .map_err(|e| format!("ML-DSA keygen failed: {e}"))?;
+    let pub_path = format!("{out_prefix}.pub");
+    let sec_path = format!("{out_prefix}.sec");
+    std::fs::write(&pub_path, pk.into_bytes()).map_err(|e| format!("write {pub_path}: {e}"))?;
+    std::fs::write(&sec_path, sk.into_bytes()).map_err(|e| format!("write {sec_path}: {e}"))?;
+    println!("Generated ML-DSA-87 (Dilithium-5, FIPS 204) keypair:");
+    println!("  public key: {pub_path} (2592 bytes)");
+    println!("  secret key: {sec_path} (4896 bytes)  [keep this file secret]");
+    println!("\nRegister it on-chain as a validator attestation key with:");
+    println!("  ghost register-key --key {pub_path} --account <your-secret-uri>");
+    Ok(())
+}
+
+/// Read an ML-DSA-87 public key file and submit `ghostConsensus.register_ml_dsa_key`.
+/// Once registered, the signer's `validate_block` attestations and `verify_pq_signature`
+/// calls are checked on-chain against this key.
+pub fn register_ml_dsa_key(key_path: &str, suri: &str, rpc: Option<&str>) -> Result<(), String> {
+    let bytes = std::fs::read(key_path).map_err(|e| format!("cannot read '{key_path}': {e}"))?;
+    if bytes.len() != 2592 {
+        return Err(format!(
+            "ML-DSA-87 public key must be exactly 2592 bytes, but '{key_path}' has {}",
+            bytes.len()
+        ));
+    }
+    let public_key = bytes
+        .try_into()
+        .map_err(|_| "public key exceeds the 2592-byte bound".to_string())?;
+    let call = RuntimeCall::GhostConsensus(pallet_ghost_consensus::Call::register_ml_dsa_key {
+        algorithm: pallet_ghost_consensus::types::PqAlgorithm::MlDsa87,
+        public_key,
+    });
+    submit_call(call, suri, rpc, "register_ml_dsa_key(ML-DSA-87)")
 }
