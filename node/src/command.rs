@@ -372,5 +372,14 @@ fn handle_ghost_command(cmd: &GhostCommands) -> sc_cli::Result<()> {
             crate::wallet::register_ml_dsa_key(key, suri, rpc_url.as_deref())
                 .map_err(sc_cli::Error::Input)
         }
+        GhostCommands::PqKemKeygen { out } => {
+            crate::pq_encrypt::cli_keygen(out).map_err(sc_cli::Error::Input)
+        }
+        GhostCommands::PqEncrypt { to, input, output } => {
+            crate::pq_encrypt::cli_encrypt(to, input, output).map_err(sc_cli::Error::Input)
+        }
+        GhostCommands::PqDecrypt { dk, input, output } => {
+            crate::pq_encrypt::cli_decrypt(dk, input, output).map_err(sc_cli::Error::Input)
+        }
     }
 }

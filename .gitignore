@@ -11,6 +11,8 @@
 Thumbs.db
 .DS_Store
 
-# Generated ML-DSA keypairs from `ghost pq-keygen` (never commit secret keys)
+# Generated PQ keypairs from `ghost pq-keygen` / `ghost pq-kem-keygen` (never commit secrets)
 *.sec
 *.pub
+*.ek
+*.dk

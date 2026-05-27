@@ -177,4 +177,44 @@ pub enum GhostCommands {
         #[arg(long)]
         rpc_url: Option<String>,
     },
+
+    /// Generate an ML-KEM-1024 (FIPS 203) encryption keypair to <out>.ek and <out>.dk
+    #[command(name = "pq-kem-keygen")]
+    PqKemKeygen {
+        /// Output path prefix (writes <out>.ek public and <out>.dk secret)
+        #[arg(long, default_value = "ghost-mlkem")]
+        out: String,
+    },
+
+    /// Encrypt a file to a recipient's ML-KEM-1024 public key (ML-KEM + ChaCha20-Poly1305)
+    #[command(name = "pq-encrypt")]
+    PqEncrypt {
+        /// Recipient encapsulation (public) key file (e.g. recipient.ek)
+        #[arg(long)]
+        to: String,
+
+        /// Plaintext input file
+        #[arg(long = "in")]
+        input: String,
+
+        /// Encrypted output file
+        #[arg(long = "out")]
+        output: String,
+    },
+
+    /// Decrypt a file with your ML-KEM-1024 decapsulation (secret) key
+    #[command(name = "pq-decrypt")]
+    PqDecrypt {
+        /// Your decapsulation (secret) key file (e.g. me.dk)
+        #[arg(long)]
+        dk: String,
+
+        /// Encrypted input file
+        #[arg(long = "in")]
+        input: String,
+
+        /// Decrypted output file
+        #[arg(long = "out")]
+        output: String,
+    },
 }

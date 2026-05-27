@@ -74,6 +74,11 @@ cargo run --bin ghost-node -- ghost transfer --to //Bob --amount 5000000000000
 cargo run --bin ghost-node -- ghost pq-keygen --out my-validator-key
 cargo run --bin ghost-node -- ghost register-key --key my-validator-key.pub
 
+# Post-quantum encryption: ML-KEM-1024 (FIPS 203) key encapsulation + ChaCha20-Poly1305
+cargo run --bin ghost-node -- ghost pq-kem-keygen --out recipient
+cargo run --bin ghost-node -- ghost pq-encrypt --to recipient.ek --in secret.txt --out secret.enc
+cargo run --bin ghost-node -- ghost pq-decrypt --dk recipient.dk --in secret.enc --out secret.out
+
 # Local PoW benchmark demo (runs the real work function; does NOT submit to the chain)
 cargo run --bin ghost-node -- ghost mine --threads 2
 ```
@@ -82,7 +87,9 @@ cargo run --bin ghost-node -- ghost mine --threads 2
 state (`validators` also reports each validator's ML-DSA key status); `stake`/`unstake`/
 `transfer`/`register-key` build, sign, and submit via `author_submitExtrinsic`. `pq-keygen`
 writes a real ML-DSA-87 keypair (`<out>.pub` 2592 bytes / `<out>.sec` 4896 bytes; keep the
-secret file safe).
+secret file safe). `pq-kem-keygen`/`pq-encrypt`/`pq-decrypt` provide offline ML-KEM-1024 +
+ChaCha20-Poly1305 hybrid encryption (`<out>.ek` 1568 / `<out>.dk` 3168 bytes) and need no
+running node.
 
 ## Important Paths
 

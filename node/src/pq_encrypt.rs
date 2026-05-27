@@ -302,6 +302,68 @@ fn generate_nonce() -> Result<[u8; NONCE_LEN], PqEncryptError> {
     Ok(nonce)
 }
 
+// ── File-based CLI helpers ──────────────────────────────────────────────────────
+
+/// Run `f` on a worker thread with a generous stack; ML-KEM matrix work can use more
+/// stack than the main thread provides on some platforms.
+fn on_big_stack<F, R>(f: F) -> Result<R, String>
+where
+    F: FnOnce() -> R + Send + 'static,
+    R: Send + 'static,
+{
+    std::thread::Builder::new()
+        .stack_size(16 * 1024 * 1024)
+        .spawn(f)
+        .map_err(|e| format!("failed to spawn crypto thread: {e}"))?
+        .join()
+        .map_err(|_| "crypto thread panicked".to_string())
+}
+
+/// `pq-kem-keygen`: write an ML-KEM-1024 keypair to `<out>.ek` and `<out>.dk`.
+pub fn cli_keygen(out_prefix: &str) -> Result<(), String> {
+    let (ek, dk) = on_big_stack(keygen)?.map_err(|e| format!("ML-KEM keygen failed: {e:?}"))?;
+    let ek_path = format!("{out_prefix}.ek");
+    let dk_path = format!("{out_prefix}.dk");
+    std::fs::write(&ek_path, ek).map_err(|e| format!("write {ek_path}: {e}"))?;
+    std::fs::write(&dk_path, dk).map_err(|e| format!("write {dk_path}: {e}"))?;
+    println!("Generated ML-KEM-1024 (Kyber, FIPS 203) keypair:");
+    println!("  encapsulation (public) key: {ek_path} ({EK_LEN} bytes)");
+    println!("  decapsulation (secret) key: {dk_path} ({DK_LEN} bytes)  [keep this file secret]");
+    println!("\nEncrypt a file to this recipient with:");
+    println!("  ghost pq-encrypt --to {ek_path} --in <plaintext> --out <ciphertext>");
+    Ok(())
+}
+
+/// `pq-encrypt`: encrypt `in_path` to recipient `ek_path`, writing the bundle to `out_path`.
+pub fn cli_encrypt(ek_path: &str, in_path: &str, out_path: &str) -> Result<(), String> {
+    let ek = std::fs::read(ek_path).map_err(|e| format!("read {ek_path}: {e}"))?;
+    let plaintext = std::fs::read(in_path).map_err(|e| format!("read {in_path}: {e}"))?;
+    let msg = on_big_stack(move || encrypt_to(&ek, &plaintext))?
+        .map_err(|e| format!("encryption failed: {e:?}"))?;
+    let bytes = msg.to_bytes();
+    let n = bytes.len();
+    std::fs::write(out_path, bytes).map_err(|e| format!("write {out_path}: {e}"))?;
+    println!("Encrypted {in_path} -> {out_path} ({n} bytes) for recipient {ek_path}");
+    println!("  (ML-KEM-1024 encapsulation + ChaCha20-Poly1305 AEAD)");
+    Ok(())
+}
+
+/// `pq-decrypt`: decrypt `in_path` with decapsulation key `dk_path` to `out_path`.
+pub fn cli_decrypt(dk_path: &str, in_path: &str, out_path: &str) -> Result<(), String> {
+    let dk = std::fs::read(dk_path).map_err(|e| format!("read {dk_path}: {e}"))?;
+    let ct = std::fs::read(in_path).map_err(|e| format!("read {in_path}: {e}"))?;
+    let plaintext = on_big_stack(move || {
+        EncryptedMessage::from_bytes(&ct).and_then(|m| decrypt(&dk, &m))
+    })?
+    .ok_or_else(|| {
+        "decryption failed (wrong key, tampered ciphertext, or malformed input)".to_string()
+    })?;
+    let n = plaintext.len();
+    std::fs::write(out_path, plaintext).map_err(|e| format!("write {out_path}: {e}"))?;
+    println!("Decrypted {in_path} -> {out_path} ({n} bytes)");
+    Ok(())
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
