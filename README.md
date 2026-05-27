@@ -52,12 +52,31 @@ cargo test -p pallet-ghost-consensus --target-dir .cargo-target
 cargo run --bin ghost-node -- --dev
 ```
 
-## Ghost CLI Helpers
+## Ghost CLI Wallet & Helpers
+
+A running node exposes JSON-RPC (default `http://127.0.0.1:9944`). The `ghost` subcommands
+query live chain state and sign + submit real extrinsics against it (sr25519, using the
+runtime's own extrinsic types). All accept `--rpc-url` to target a non-default endpoint.
 
 ```sh
+# Read-only live queries
+cargo run --bin ghost-node -- ghost balance --account //Alice
+cargo run --bin ghost-node -- ghost validators
 cargo run --bin ghost-node -- ghost status --detailed
+
+# Signed + submitted transactions (default signer //Alice; override with --account <suri|seed>)
+cargo run --bin ghost-node -- ghost stake --amount 3000000000000
+cargo run --bin ghost-node -- ghost unstake --amount 1000000000000
+cargo run --bin ghost-node -- ghost transfer --to //Bob --amount 5000000000000
+
+# Local PoW benchmark demo (runs the real work function; does NOT submit to the chain)
 cargo run --bin ghost-node -- ghost mine --threads 2
 ```
+
+`balance`/`validators` decode `System.Account` and `GhostConsensus.ValidatorStakes` from
+state; `stake`/`unstake`/`transfer` build, sign, and submit via `author_submitExtrinsic`.
+ML-DSA validator-key registration (`register_ml_dsa_key`) is still submitted via Polkadot.js
+/ RPC (a CLI keygen + register flow is a planned follow-up).
 
 ## Important Paths
 

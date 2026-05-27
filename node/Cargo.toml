@@ -25,7 +25,9 @@ fips203 = { version = "0.4.3", default-features = false, features = ["ml-kem-102
 chacha20poly1305 = { version = "0.10" }
 futures = { workspace = true, features = ["thread-pool"] }
 futures-timer = "3.0.3"
-jsonrpsee = { workspace = true, features = ["server"] }
+jsonrpsee = { workspace = true, features = ["server", "http-client"] }
+# Async runtime for the CLI wallet's RPC client (the node itself uses sc-cli's runtime).
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 # substrate client
 sc-basic-authorship = { workspace = true, default-features = true }
@@ -61,6 +63,8 @@ sp-timestamp = { workspace = true, default-features = true }
 # frame and pallets
 frame-metadata-hash-extension = { workspace = true, default-features = true }
 frame-system = { workspace = true, default-features = true }
+pallet-balances = { workspace = true, default-features = true }
+pallet-ghost-consensus = { workspace = true, default-features = true }
 pallet-transaction-payment = { workspace = true, default-features = true }
 pallet-transaction-payment-rpc = { workspace = true, default-features = true }
 substrate-frame-rpc-system = { workspace = true, default-features = true }

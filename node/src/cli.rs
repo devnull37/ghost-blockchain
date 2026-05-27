@@ -70,36 +70,68 @@ pub enum GhostCommands {
         difficulty: Option<u64>,
     },
 
-    /// Stake tokens for PoS validation
+    /// Stake tokens for PoS validation (signs + submits to a running node)
     #[command(name = "stake")]
     Stake {
         /// Amount to stake in raw runtime balance units
         #[arg(long)]
         amount: u128,
 
-        /// Account to stake from (if not provided, uses default account)
+        /// Signer secret URI / dev seed (e.g. //Alice). Defaults to //Alice.
         #[arg(long)]
         account: Option<String>,
+
+        /// Node JSON-RPC endpoint. Defaults to http://127.0.0.1:9944.
+        #[arg(long)]
+        rpc_url: Option<String>,
     },
 
-    /// Unstake tokens
+    /// Unstake tokens (signs + submits to a running node)
     #[command(name = "unstake")]
     Unstake {
         /// Amount to unstake in raw runtime balance units
         #[arg(long)]
         amount: u128,
 
-        /// Account to unstake from
+        /// Signer secret URI / dev seed (e.g. //Alice). Defaults to //Alice.
         #[arg(long)]
         account: Option<String>,
+
+        /// Node JSON-RPC endpoint. Defaults to http://127.0.0.1:9944.
+        #[arg(long)]
+        rpc_url: Option<String>,
     },
 
-    /// Check balance and staking information
-    #[command(name = "balance")]
-    Balance {
-        /// Account to check (if not provided, shows all accounts)
+    /// Transfer balance to another account (signs + submits to a running node)
+    #[command(name = "transfer")]
+    Transfer {
+        /// Destination: an SS58 address or a dev seed (e.g. //Bob)
+        #[arg(long)]
+        to: String,
+
+        /// Amount to transfer in raw runtime balance units
+        #[arg(long)]
+        amount: u128,
+
+        /// Signer secret URI / dev seed (e.g. //Alice). Defaults to //Alice.
         #[arg(long)]
         account: Option<String>,
+
+        /// Node JSON-RPC endpoint. Defaults to http://127.0.0.1:9944.
+        #[arg(long)]
+        rpc_url: Option<String>,
+    },
+
+    /// Query a live account balance from a running node
+    #[command(name = "balance")]
+    Balance {
+        /// Account: an SS58 address or a dev seed (e.g. //Alice). Defaults to //Alice.
+        #[arg(long)]
+        account: Option<String>,
+
+        /// Node JSON-RPC endpoint. Defaults to http://127.0.0.1:9944.
+        #[arg(long)]
+        rpc_url: Option<String>,
     },
 
     /// Show live consensus and record-only PQ metadata status
@@ -110,11 +142,15 @@ pub enum GhostCommands {
         detailed: bool,
     },
 
-    /// Show validator information
+    /// List the live staked validator set from a running node
     #[command(name = "validators")]
     Validators {
-        /// Show only active validators
+        /// Reserved for future filtering; currently all staked validators are shown
         #[arg(long)]
         active_only: bool,
+
+        /// Node JSON-RPC endpoint. Defaults to http://127.0.0.1:9944.
+        #[arg(long)]
+        rpc_url: Option<String>,
     },
 }

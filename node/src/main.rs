@@ -10,6 +10,7 @@ mod pow;
 mod pq_encrypt;
 mod rpc;
 mod service;
+mod wallet;
 
 fn main() -> sc_cli::Result<()> {
 	command::run()

@@ -265,64 +265,35 @@ fn handle_ghost_command(cmd: &GhostCommands) -> sc_cli::Result<()> {
 
             Ok(())
         }
-        GhostCommands::Stake { amount, account } => {
-            println!("Preparing a Ghost pallet staking call...");
-            println!("   Amount: {} raw balance units", amount);
-            if let Some(acc) = account {
-                println!("   Account: {}", acc);
-            } else {
-                println!("   Using default account (Alice)");
-            }
-            println!("   Unit reference: 1 Ghost = {} raw units", UNIT);
-            println!("   Minimum stake in runtime config: {} raw units", UNIT);
-            println!("\nTo stake, submit this pallet extrinsic:");
-            println!("   ghostConsensus.stake({})", amount);
-            println!("\nYou can submit this via:");
-            println!("   1. Polkadot.js Apps UI (https://polkadot.js.org/apps)");
-            println!("   2. Using substrate-api-client");
-            println!("   3. Direct RPC call to your running node");
-            Ok(())
+        GhostCommands::Stake {
+            amount,
+            account,
+            rpc_url,
+        } => {
+            let suri = account.as_deref().unwrap_or(crate::wallet::DEFAULT_SURI);
+            crate::wallet::stake(*amount, suri, rpc_url.as_deref()).map_err(sc_cli::Error::Input)
         }
-        GhostCommands::Unstake { amount, account } => {
-            println!("Preparing a Ghost pallet unstake call...");
-            println!("   Amount: {} raw balance units", amount);
-            if let Some(acc) = account {
-                println!("   Account: {}", acc);
-            } else {
-                println!("   Using default account (Alice)");
-            }
-            println!("   Unit reference: 1 Ghost = {} raw units", UNIT);
-            println!("\nTo unstake, submit this pallet extrinsic:");
-            println!("   ghostConsensus.unstake({})", amount);
-            println!("\nYou can submit this via:");
-            println!("   1. Polkadot.js Apps UI (https://polkadot.js.org/apps)");
-            println!("   2. Using substrate-api-client");
-            println!("   3. Direct RPC call to your running node");
-            Ok(())
+        GhostCommands::Unstake {
+            amount,
+            account,
+            rpc_url,
+        } => {
+            let suri = account.as_deref().unwrap_or(crate::wallet::DEFAULT_SURI);
+            crate::wallet::unstake(*amount, suri, rpc_url.as_deref()).map_err(sc_cli::Error::Input)
         }
-        GhostCommands::Balance { account } => {
-            println!("Balance and staking guidance");
-            if let Some(acc) = account {
-                println!("   Account: {}", acc);
-                println!(
-                    "   Query this account on a running node for live balances and pallet state."
-                );
-            } else {
-                println!("   Default development accounts to inspect:");
-                println!("\n   Alice:");
-                println!("      Address: 5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY");
-                println!("      Role: endowed development account");
-                println!("\n   Bob:");
-                println!("      Address: 5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty");
-                println!("      Role: endowed development account");
-            }
-            println!("\nUnit reference: 1 Ghost = {} raw units", UNIT);
-            println!(
-                "Note: this command does not query the node, so it does not print live balances."
-            );
-            println!("\nTo check live balance, connect to your running node via:");
-            println!("   Polkadot.js Apps UI: https://polkadot.js.org/apps/#/accounts");
-            Ok(())
+        GhostCommands::Transfer {
+            to,
+            amount,
+            account,
+            rpc_url,
+        } => {
+            let suri = account.as_deref().unwrap_or(crate::wallet::DEFAULT_SURI);
+            crate::wallet::transfer(to, *amount, suri, rpc_url.as_deref())
+                .map_err(sc_cli::Error::Input)
+        }
+        GhostCommands::Balance { account, rpc_url } => {
+            let acc = account.as_deref().unwrap_or(crate::wallet::DEFAULT_SURI);
+            crate::wallet::show_balance(acc, rpc_url.as_deref()).map_err(sc_cli::Error::Input)
         }
         GhostCommands::Status { detailed } => {
             println!("Ghost Consensus Status");
@@ -385,22 +356,9 @@ fn handle_ghost_command(cmd: &GhostCommands) -> sc_cli::Result<()> {
             println!("\nConnect your node to inspect live state via Polkadot.js Apps.");
             Ok(())
         }
-        GhostCommands::Validators { active_only } => {
-            println!("Validator Information");
-            println!("===============================================");
-            if *active_only {
-                println!("   Filter: Active validators only");
-            } else {
-                println!("   Filter: All validators");
-            }
-            println!("\n   Default development authorities/accounts to inspect:");
-            println!("      - Alice (5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY)");
-            println!("      - Bob (5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty)");
-            println!("\nTo see live validator info:");
-            println!("   1. Start your node: ./target/release/ghost-node --dev");
-            println!("   2. Connect via Polkadot.js Apps");
-            println!("   3. Navigate to the ghostConsensus pallet state");
-            Ok(())
-        }
+        GhostCommands::Validators {
+            active_only: _,
+            rpc_url,
+        } => crate::wallet::list_validators(rpc_url.as_deref()).map_err(sc_cli::Error::Input),
     }
 }
