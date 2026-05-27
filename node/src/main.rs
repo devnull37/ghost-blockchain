@@ -6,6 +6,8 @@ mod chain_spec;
 mod cli;
 mod command;
 mod miner;
+mod pow;
+mod pq_encrypt;
 mod rpc;
 mod service;
 

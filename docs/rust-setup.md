@@ -2,6 +2,36 @@
 
 This guide is for reference only, please check the latest information on getting started with Substrate [here](https://docs.substrate.io/main-docs/install/).
 
+## Ghost local prerequisites
+
+The repository currently builds a Substrate node plus the experimental `pallet-ghost-consensus` runtime model. It does
+not ship post-quantum cryptography or custom network encryption today, but any local exploration of future PQ or
+network-crypto work still depends on a working native Rust, Wasm, and OpenSSL toolchain.
+
+Before you start, make sure your machine can provide:
+
+- `rustup`, `cargo`, and a stable Rust toolchain
+- the `wasm32-unknown-unknown` target for runtime builds
+- C/C++ build tooling required by Rust native dependencies
+- OpenSSL headers and libraries
+- Perl on native Windows, because `openssl-sys` may fall back to building vendored OpenSSL from source
+
+If you are setting up a fresh workstation for this repository, validate the environment with:
+
+```bash
+cargo build --bin ghost-node
+cargo test -p pallet-ghost-consensus
+```
+
+If your shell does not already pick up the repository helper toolchain, you can also install the components mirrored in
+`env-setup/rust-toolchain.toml`:
+
+```bash
+rustup default stable
+rustup component add clippy rust-analyzer rust-src rustfmt
+rustup target add wasm32-unknown-unknown
+```
+
 This page will guide you through the **2 steps** needed to prepare a computer for **Substrate** development. Since
 Substrate is built with [the Rust programming language](https://www.rust-lang.org/), the first thing you will need to do
 is prepare the computer for Rust development - these steps will vary based on the computer's operating system. Once Rust
@@ -74,6 +104,30 @@ recommended to use [Windows Subsystem Linux](https://docs.microsoft.com/en-us/wi
 Please refer to the separate
 [guide for native Windows development](https://docs.substrate.io/main-docs/install/windows/).
 
+For this repository, WSL remains the preferred path for any work that touches network-facing cryptography, TLS, or
+future PQ experiments. A native Windows shell can hit dependency builds that are harder to recover from.
+
+### Native Windows OpenSSL and Perl note
+
+An observed local blocker in this repository is:
+
+- `cargo check --bin ghost-node` can fail because `openssl-sys` needs `perl` while building vendored OpenSSL
+
+If you must stay on native Windows, install these pieces before debugging Rust errors:
+
+- Visual Studio Build Tools with the C++ workload
+- Strawberry Perl or another Perl distribution available on `PATH`
+- OpenSSL development libraries, or enough tooling for vendored OpenSSL builds
+
+After installing them, open a fresh shell and rerun:
+
+```powershell
+cargo build --bin ghost-node
+```
+
+If you only need a reliable local environment for build, test, or audit prep, moving the repository into WSL is usually
+faster than chasing native Windows OpenSSL toolchain issues.
+
 ## Rust developer environment
 
 This guide uses <https://rustup.rs> installer and the `rustup` tool to manage the Rust toolchain. First install and
@@ -99,6 +153,25 @@ rustup target add wasm32-unknown-unknown --toolchain nightly
 
 Now the best way to ensure that you have successfully prepared a computer for Substrate development is to follow the
 steps in [our first Substrate tutorial](https://docs.substrate.io/tutorials/v3/create-your-first-substrate-chain/).
+
+For this repository specifically, also run:
+
+```bash
+cargo build --bin ghost-node
+cargo test -p pallet-ghost-consensus
+```
+
+If you are preparing for crypto-adjacent design or audit work, capture the output of:
+
+```bash
+rustup show
+cargo --version
+rustc --version
+perl -v
+openssl version
+```
+
+That baseline is useful when reproducing dependency or toolchain failures across platforms.
 
 ## Troubleshooting Substrate builds
 

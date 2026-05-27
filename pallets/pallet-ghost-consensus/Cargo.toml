@@ -18,17 +18,37 @@ workspace = true
 [dependencies]
 codec = { workspace = true, features = ["derive"] }
 scale-info = { workspace = true, features = ["derive"] }
+serde = { workspace = true, optional = true, features = ["derive"] }
 frame-benchmarking = { workspace = true, optional = true }
 frame-support = { workspace = true }
 frame-system = { workspace = true }
 pallet-balances = { workspace = true }
+pallet-timestamp = { workspace = true }
 sp-core = { workspace = true }
 sp-runtime = { workspace = true }
+
+# Post-quantum signatures: ML-DSA / NIST FIPS 204 ("Dilithium" levels 2/3/5).
+# Pure-Rust, no_std, allocation-free verify path. `default-rng` (the only thing
+# that pulls getrandom) is intentionally NOT enabled here — the runtime only ever
+# verifies signatures, so this compiles cleanly into the Wasm runtime.
+fips204 = { version = "0.4.6", default-features = false, features = [
+    "ml-dsa-44",
+    "ml-dsa-65",
+    "ml-dsa-87",
+] }
 
 [dev-dependencies]
 sp-core = { workspace = true, default-features = true }
 sp-io = { workspace = true, default-features = true }
 sp-runtime = { workspace = true, default-features = true }
+# Enable RNG-backed keygen/signing for tests only. Feature unification means the
+# test build gets `default-rng`; the runtime (non-test) build never does.
+fips204 = { version = "0.4.6", default-features = false, features = [
+    "ml-dsa-44",
+    "ml-dsa-65",
+    "ml-dsa-87",
+    "default-rng",
+] }
 
 [features]
 default = ["std"]
@@ -38,16 +58,23 @@ std = [
     "frame-support/std",
     "frame-system/std",
     "pallet-balances/std",
+    "pallet-timestamp/std",
     "scale-info/std",
+    "serde/std",
     "sp-core/std",
     "sp-io/std",
     "sp-runtime/std",
 ]
 runtime-benchmarks = [
     "frame-benchmarking/runtime-benchmarks",
+    "frame-support/runtime-benchmarks",
     "frame-system/runtime-benchmarks",
+    "pallet-balances/runtime-benchmarks",
+    "pallet-timestamp/runtime-benchmarks",
+    "sp-runtime/runtime-benchmarks",
 ]
 try-runtime = [
     "frame-support/try-runtime",
     "frame-system/try-runtime",
+    "pallet-timestamp/try-runtime",
 ]

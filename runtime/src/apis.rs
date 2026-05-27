@@ -28,20 +28,18 @@ use frame_support::{
 	genesis_builder_helper::{build_state, get_preset},
 	weights::Weight,
 };
-use pallet_grandpa::AuthorityId as GrandpaId;
 use sp_api::impl_runtime_apis;
-use sp_consensus_aura::sr25519::AuthorityId as AuraId;
-use sp_core::{crypto::KeyTypeId, OpaqueMetadata};
+use sp_core::{crypto::KeyTypeId, OpaqueMetadata, U256};
 use sp_runtime::{
-	traits::{Block as BlockT, NumberFor},
+	traits::Block as BlockT,
 	transaction_validity::{TransactionSource, TransactionValidity},
 	ApplyExtrinsicResult,
 };
 use sp_version::RuntimeVersion;
 
 use super::{
-	AccountId, Aura, Balance, Block, Executive, Grandpa, InherentDataExt, Nonce, Runtime,
-	RuntimeCall, RuntimeGenesisConfig, SessionKeys, System, TransactionPayment, VERSION,
+	AccountId, Balance, Block, Executive, InherentDataExt, Nonce, Runtime, RuntimeCall,
+	RuntimeGenesisConfig, SessionKeys, System, TransactionPayment, VERSION,
 };
 
 impl_runtime_apis! {
@@ -70,12 +68,6 @@ impl_runtime_apis! {
 
 		fn metadata_versions() -> Vec<u32> {
 			Runtime::metadata_versions()
-		}
-	}
-
-	impl frame_support::view_functions::runtime_api::RuntimeViewFunction<Block> for Runtime {
-		fn execute_view_function(id: frame_support::view_functions::ViewFunctionId, input: Vec<u8>) -> Result<Vec<u8>, frame_support::view_functions::ViewFunctionDispatchError> {
-			Runtime::execute_view_function(id, input)
 		}
 	}
 
@@ -116,13 +108,11 @@ impl_runtime_apis! {
 		}
 	}
 
-	impl sp_consensus_aura::AuraApi<Block, AuraId> for Runtime {
-		fn slot_duration() -> sp_consensus_aura::SlotDuration {
-			sp_consensus_aura::SlotDuration::from_millis(Aura::slot_duration())
-		}
-
-		fn authorities() -> Vec<AuraId> {
-			pallet_aura::Authorities::<Runtime>::get().into_inner()
+	impl sp_consensus_pow::DifficultyApi<Block, U256> for Runtime {
+		fn difficulty() -> U256 {
+			// PoW difficulty (conventional: higher = harder) maintained on-chain by
+			// pallet-ghost-consensus and retargeted toward the target block time.
+			U256::from(pallet_ghost_consensus::Difficulty::<Runtime>::get())
 		}
 	}
 
@@ -135,33 +125,6 @@ impl_runtime_apis! {
 			encoded: Vec<u8>,
 		) -> Option<Vec<(Vec<u8>, KeyTypeId)>> {
 			SessionKeys::decode_into_raw_public_keys(&encoded)
-		}
-	}
-
-	impl sp_consensus_grandpa::GrandpaApi<Block> for Runtime {
-		fn grandpa_authorities() -> sp_consensus_grandpa::AuthorityList {
-			Grandpa::grandpa_authorities()
-		}
-
-		fn current_set_id() -> sp_consensus_grandpa::SetId {
-			Grandpa::current_set_id()
-		}
-
-		fn submit_report_equivocation_unsigned_extrinsic(
-			_equivocation_proof: sp_consensus_grandpa::EquivocationProof<
-				<Block as BlockT>::Hash,
-				NumberFor<Block>,
-			>,
-			_key_owner_proof: sp_consensus_grandpa::OpaqueKeyOwnershipProof,
-		) -> Option<()> {
-			None
-		}
-
-		fn generate_key_ownership_proof(
-			_set_id: sp_consensus_grandpa::SetId,
-			_authority_id: GrandpaId,
-		) -> Option<sp_consensus_grandpa::OpaqueKeyOwnershipProof> {
-			None
 		}
 	}
 
