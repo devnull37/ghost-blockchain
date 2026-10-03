@@ -5,6 +5,7 @@ members = [
     "runtime",
     "pallets/*",
     "primitives/*",
+    "consensus/ghost-consensus",
 ]
 
 [workspace.package]
