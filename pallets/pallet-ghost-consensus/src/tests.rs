@@ -812,3 +812,92 @@ fn migration_is_noop_when_already_v2() {
         assert_eq!(crate::Difficulty::<Test>::get(), U256::from(9_999u64));
     });
 }
+
+// ---------------------------------------------------------------------------
+// Property tests (proptest)
+// ---------------------------------------------------------------------------
+
+proptest::proptest! {
+    /// Block reward conservation for arbitrary validator sets: exactly
+    /// `BlockReward` is minted per block, each staked active validator
+    /// receives `floor(60% * stake / total_stake)`, and the author absorbs
+    /// the 40% share plus every rounding remainder — no dust is created or
+    /// destroyed anywhere in the split.
+    #[test]
+    fn reward_conservation_arbitrary(
+        stakes in proptest::collection::vec(MIN_STAKE..9_000u128, 0..=5usize),
+        author_idx in 0usize..6usize,
+    ) {
+        new_test_ext().execute_with(|| {
+            const ACCOUNTS: [AccountId; 5] = [ALICE, BOB, CHARLIE, DAVE, EVE];
+            for (i, stake) in stakes.iter().enumerate() {
+                bond_and_validate(ACCOUNTS[i], *stake);
+            }
+            <GhostConsensus as pallet_session::SessionManager<AccountId>>::new_session_genesis(0);
+            <GhostConsensus as pallet_session::SessionManager<AccountId>>::start_session(0);
+
+            // Author can be an outsider (minted-into fresh account) or a
+            // staked validator.
+            let author = *ACCOUNTS.get(author_idx).unwrap_or(&99u64);
+            let reserve = GhostConsensus::account_id();
+            let watched: Vec<AccountId> = ACCOUNTS
+                .iter()
+                .copied()
+                .chain([author, reserve])
+                .collect();
+            // Baseline AFTER bonding: bonds are holds (already reflected in
+            // free_balance), so deltas across on_finalize are pure mints.
+            let before: Vec<Balance> = watched.iter().map(Balances::free_balance).collect();
+            let issuance_before = Balances::total_issuance();
+
+            set_author(author);
+            <GhostConsensus as Hooks<u64>>::on_finalize(System::block_number());
+
+            // Reconstruct the expected active set + split from storage.
+            let mut scored: Vec<(AccountId, Balance)> = crate::Candidates::<Test>::get()
+                .into_iter()
+                .map(|who| (who, GhostConsensus::bonded(&who)))
+                .filter(|(_, s)| *s >= MIN_STAKE)
+                .collect();
+            scored.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+            scored.truncate(3); // MaxValidators
+            let total_stake: Balance = scored.iter().map(|(_, s)| s).sum();
+
+            let pot = 60u128; // 60% of BLOCK_REWARD = 100
+            let mut expected: std::collections::BTreeMap<AccountId, Balance> =
+                std::collections::BTreeMap::new();
+            let paid_to_validators: Balance = if total_stake.is_zero() {
+                expected.insert(reserve, pot);
+                pot
+            } else {
+                scored
+                    .iter()
+                    .map(|(who, stake)| {
+                        let share: Balance = (U256::from(pot) * U256::from(*stake)
+                            / U256::from(total_stake))
+                        .try_into()
+                        .unwrap();
+                        *expected.entry(*who).or_default() += share;
+                        share
+                    })
+                    .sum()
+            };
+            // Author: 40% + all rounding remainder (100 - paid - 40 → +40).
+            *expected.entry(author).or_default() += BLOCK_REWARD - paid_to_validators;
+
+            for (i, who) in watched.iter().enumerate() {
+                let delta = Balances::free_balance(who).saturating_sub(before[i]);
+                assert_eq!(
+                    delta,
+                    *expected.get(who).unwrap_or(&0),
+                    "unexpected mint for account {who}"
+                );
+            }
+            assert_eq!(
+                Balances::total_issuance().saturating_sub(issuance_before),
+                BLOCK_REWARD,
+                "total minted must equal BlockReward exactly"
+            );
+        });
+    }
+}

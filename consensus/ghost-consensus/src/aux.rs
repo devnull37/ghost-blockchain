@@ -48,6 +48,7 @@ pub fn write_aux<C: AuxStore, B: BlockT>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
     use sp_core::H256;
     use std::{collections::BTreeMap, sync::Mutex};
 
@@ -122,5 +123,33 @@ mod tests {
         let key = aux_key(&hash);
         assert_eq!(&key[..4], b"PoW:");
         assert_eq!(&key[4..], &hash[..]);
+    }
+
+    proptest::proptest! {
+        /// Aux persistence round-trips arbitrary difficulty pairs through the
+        /// real SCALE encoding the import path writes.
+        #[test]
+        fn aux_roundtrip_arbitrary(
+            hash in any::<[u8; 32]>(),
+            difficulty in any::<[u8; 32]>(),
+            total in any::<[u8; 32]>(),
+        ) {
+            let store = MemAuxStore::default();
+            let hash = H256::from(hash);
+            let aux = PowAux {
+                difficulty: U256::from_big_endian(&difficulty),
+                total_difficulty: U256::from_big_endian(&total),
+            };
+            write_aux::<_, TestBlock>(&store, &hash, &aux).unwrap();
+            let back = read_aux::<_, TestBlock>(&store, &hash).unwrap();
+            prop_assert_eq!(back.difficulty, aux.difficulty);
+            prop_assert_eq!(back.total_difficulty, aux.total_difficulty);
+            // Keys never collide for distinct hashes and always carry the
+            // upstream prefix — a wrong key scheme would silently split
+            // total-difficulty accounting from the import path's writes.
+            let key = aux_key(&hash);
+            prop_assert_eq!(&key[..4], b"PoW:");
+            prop_assert_eq!(key.len(), 4 + 32);
+        }
     }
 }

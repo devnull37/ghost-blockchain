@@ -204,6 +204,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
     fn leaf_ordering() {
@@ -236,5 +237,40 @@ mod tests {
             (U256::from(50u64), &h1),
             (U256::from(50u64), &h1)
         ));
+    }
+
+    proptest::proptest! {
+        /// `leaf_beats` must be a strict total order on (total, tie_hash)
+        /// pairs — the same ordering `break_tie` applies — or the import-time
+        /// and selection-time fork choices can diverge.
+        #[test]
+        fn leaf_beats_is_a_total_order(
+            a in (any::<u64>(), any::<[u8; 32]>()),
+            b in (any::<u64>(), any::<[u8; 32]>()),
+            c in (any::<u64>(), any::<[u8; 32]>()),
+        ) {
+            let (at, ah) = (U256::from(a.0), &a.1);
+            let (bt, bh) = (U256::from(b.0), &b.1);
+            let (ct, ch) = (U256::from(c.0), &c.1);
+
+            // Irreflexive.
+            prop_assert!(!leaf_beats((at, ah), (at, ah)));
+
+            // Asymmetric: at most one direction can win.
+            prop_assert!(!(leaf_beats((at, ah), (bt, bh)) && leaf_beats((bt, bh), (at, ah))));
+
+            // Total on distinct keys: distinct (total, pre_hash) pairs order.
+            if (at, ah) != (bt, bh) {
+                prop_assert!(
+                    leaf_beats((at, ah), (bt, bh)) || leaf_beats((bt, bh), (at, ah)),
+                    "distinct leaves must be comparable"
+                );
+            }
+
+            // Transitive: a beats b and b beats c implies a beats c.
+            if leaf_beats((at, ah), (bt, bh)) && leaf_beats((bt, bh), (ct, ch)) {
+                prop_assert!(leaf_beats((at, ah), (ct, ch)));
+            }
+        }
     }
 }

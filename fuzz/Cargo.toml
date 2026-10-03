@@ -1,0 +1,55 @@
+[package]
+name = "ghost-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+license = "Unlicense"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+parity-scale-codec = "3.7.5"
+sp-core = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407" }
+sp-runtime = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407" }
+# `cargo fuzz` compiles every crate in the graph with `--cfg fuzzing`; deps
+# that gate fuzz-only code on that cfg then need their optional fuzz
+# dependencies enabled or they fail to build.
+quinn-proto = { version = "0.9", features = ["arbitrary"] }
+
+[dependencies.ghost-pow-primitives]
+path = "../primitives/ghost-pow"
+
+[dependencies.ghost-consensus]
+path = "../consensus/ghost-consensus"
+
+[[bin]]
+name = "seal_decode"
+path = "fuzz_targets/seal_decode.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "digest_parse"
+path = "fuzz_targets/digest_parse.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "consensus_math"
+path = "fuzz_targets/consensus_math.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "seal_verify_and_order"
+path = "fuzz_targets/seal_verify_and_order.rs"
+test = false
+doc = false
+
+# This crate is its own workspace: the repo workspace lists members
+# explicitly, so nothing here can leak into `cargo test --workspace` or CI
+# (fuzz targets need cargo-fuzz tooling, not the stable test harness).
+[workspace]
