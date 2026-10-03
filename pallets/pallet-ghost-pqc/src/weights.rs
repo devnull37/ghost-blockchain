@@ -60,9 +60,12 @@ impl<T: frame_system::Config> crate::WeightInfo for SubstrateWeight<T> {
         //  Measured:  `2829`
         //  Estimated: `2829`
         // Minimum execution time: 455_715_000 picoseconds.
+        // NOTE: reads bumped 6 -> 7 post-benchmark — the bonded-validator
+        // gate added a `pallet_ghost_consensus::Bonded` storage read.
+        // Regenerate the benchmark to fold it into measured time.
         Weight::from_parts(489_303_000, 0)
             .saturating_add(Weight::from_parts(0, 2829))
-            .saturating_add(T::DbWeight::get().reads(6))
+            .saturating_add(T::DbWeight::get().reads(7))
             .saturating_add(T::DbWeight::get().writes(3))
     }
 
@@ -106,9 +109,11 @@ impl crate::WeightInfo for () {
         //  Measured:  `2829`
         //  Estimated: `2829`
         // Minimum execution time: 455_715_000 picoseconds.
+        // NOTE: reads bumped 6 -> 7 post-benchmark — the bonded-validator
+        // gate added a `pallet_ghost_consensus::Bonded` storage read.
         Weight::from_parts(489_303_000, 0)
             .saturating_add(Weight::from_parts(0, 2829))
-            .saturating_add(RocksDbWeight::get().reads(6))
+            .saturating_add(RocksDbWeight::get().reads(7))
             .saturating_add(RocksDbWeight::get().writes(3))
     }
 
