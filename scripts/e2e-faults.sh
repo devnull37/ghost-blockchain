@@ -352,13 +352,16 @@ if [ "$slash_seen" != "1" ]; then
 fi
 echo "slash landed: SlashRecords non-empty, alice bond $bond_before -> $bond_now"
 
-# The offender is chilled out of the candidate set.
-cands="$(gc_storage "$M1_RPC" Candidates)"
-if vec_contains_acct "$cands" "$ALICE_ACCT"; then
-	echo "alice still in Candidates after slash — chill did not fire" >&2
+# The recorded offender must be Alice: her account id appears inside the
+# SlashRecords BoundedVec blob. (The candidate-set chill check would be
+# vacuous here — genesis validators enter via `stakers`, not `validate()`,
+# and deferred removal only drops her from the next `select_validators`.)
+if ! vec_contains_acct "$recs" "$ALICE_ACCT"; then
+	echo "alice not found inside SlashRecords — slash recorded a different offender?" >&2
+	echo "SlashRecords: $recs" >&2
 	exit 1
 fi
-echo "alice removed from Candidates (chilled)"
+echo "alice is the recorded offender in SlashRecords"
 
 # Finality/liveness still healthy on the remaining committee — bob alone
 # cannot finalize (N=2), so assert best keeps advancing instead.
