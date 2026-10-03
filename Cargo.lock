@@ -2739,7 +2739,6 @@ dependencies = [
  "sc-telemetry",
  "sc-transaction-pool",
  "sc-transaction-pool-api",
- "serde_json",
  "solochain-template-runtime",
  "sp-api",
  "sp-block-builder",

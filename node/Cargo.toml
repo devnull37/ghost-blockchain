@@ -23,7 +23,6 @@ codec = { workspace = true }
 futures = { workspace = true, features = ["thread-pool"] }
 jsonrpsee = { workspace = true, features = ["server"] }
 log = "0.4.21"
-serde_json = { workspace = true }
 
 # substrate client
 sc-basic-authorship = { workspace = true, default-features = true }
