@@ -250,7 +250,12 @@ impl pallet_timestamp::Config for Runtime {
     type Moment = u64;
     /// No slot consensus owns timestamp notes; PoW clients set timestamps.
     type OnTimestampSet = ();
-    type MinimumPeriod = ConstU64<{ SLOT_DURATION / 2 }>;
+    /// 1ms — the minimum that keeps "time advances" true. PoW has no slot to
+    /// protect: a larger floor ratchets `Now` above wall time whenever block
+    /// production outpaces it, pinning `Now` at the +30s drift cap and
+    /// getting honest blocks born "in the future" rejected at import (soak
+    /// finding, docs/soak-report.md).
+    type MinimumPeriod = ConstU64<1>;
     type WeightInfo = ();
 }
 
