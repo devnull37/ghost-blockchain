@@ -8,7 +8,7 @@ Ghost is a hybrid PoW/PoS chain on Substrate (polkadot-sdk `stable2407`):
 
 - **Block production: real Proof-of-Work** via `sc-consensus-pow`. Miners grind a nonce against the block pre-hash; the import queue of every node verifies the seal before import. Fork choice is heaviest-chain by cumulative difficulty (`PowAux` aux data, `total_difficulty` comparison inside `PowBlockImport`), not longest-chain.
 - **Finality: GRANDPA.** A PoS committee (the top stakers, selected by `pallet_session`) votes to finalize blocks. PoW produces candidates; stakers provide deterministic finality. This is the honest meaning of "PoS validation" on Ghost: finality votes, not per-block extrinsics.
-- **PQC layer:** Dilithium5 / ML-DSA-87 key registry with on-chain proof-of-possession and validator attestation extrinsics, verified in no_std/Wasm. It strengthens validator identity; it does not replace GRANDPA.
+- **PQC layer:** ML-DSA-87 (FIPS-204, formerly Dilithium5) key registry with on-chain proof-of-possession and validator attestation extrinsics, verified in no_std/Wasm. It strengthens validator identity; it does not replace GRANDPA.
 
 Aura is removed entirely. Aura pallet, `AuraApi`, aura session keys, and aura service wiring are deleted. Timestamp `MinimumPeriod` becomes a constant (`2500ms`).
 
@@ -19,19 +19,19 @@ The PoW `ConsensusEngineId` is `POW_ENGINE_ID` (`b"pow_"`) from `sp_consensus_po
 - **Pre-runtime digest**: `DigestItem::PreRuntime(POW_ENGINE_ID, author)` where `author` is the SCALE-encoded `AccountId32` of the miner. `start_mining_worker`'s `pre_runtime` parameter pushes this automatically. It is part of the header before hashing, so it is covered by the seal.
 - **Seal digest**: `DigestItem::Seal(POW_ENGINE_ID, seal)` where `seal` is the SCALE encoding of `GhostSeal { nonce: u64 }`. Found via `MiningHandle::submit`.
 
-`GhostSeal` is defined in `sp-ghost-consensus` (new primitives crate) so both client and runtime can decode it.
+`GhostSeal` is defined in `ghost-pow-primitives` (`primitives/ghost-pow`) so both client and runtime can decode it.
 
 ## 3. PoW algorithm (`GhostPowAlgorithm`)
 
-Crate: `node/` sibling crate `consensus/` implementing `PowAlgorithm<Block>`.
+Crate: `consensus/ghost-consensus` (merged; crate name `ghost-consensus`) implementing `PowAlgorithm<Block>`.
 
 - `Difficulty = sp_core::U256` (already implements `TotalDifficulty` via saturating add).
 - **Difficulty is a work factor, not a target** (kulupu convention): larger = harder. `PowBlockImport` sums per-block difficulty into `total_difficulty` and picks the heaviest chain, so difficulty MUST be monotone in work — a target-style value (where easier = larger) would invert fork choice.
 - `verify(parent, pre_hash, pre_digest, seal, difficulty)`:
   - `input = pre_hash.as_ref() ++ pre_digest ++ seal.encode()`
   - `hash = blake2_256(blake2_256(input))` (double-hash; deterministic, Wasm-safe)
-  - `value = U256::from_big_endian(hash)`; valid iff `value.saturating_mul(difficulty) <= U256::MAX` (equivalent to `value <= MAX / difficulty`; overflow saturates to MAX and fails). `difficulty == 0` always fails.
-  - `pre_digest` is the raw `PreRuntime(POW_ENGINE_ID, bytes)` payload = `SCALE(AccountId32)` miner id — decode it and bind it into the verification (a block with a malformed author digest is rejected client-side; rewards decode the same digest).
+  - `value = U256::from_big_endian(hash)`; valid iff `value <= U256::MAX / difficulty` (merged: `mining.rs::pow_meets` uses `MAX.checked_div(difficulty)` — equivalent to `value * difficulty <= MAX` for `difficulty > 0`, and strictly safer at `difficulty == 0`, which must fail rather than saturate to accept).
+  - `pre_digest` is the raw `PreRuntime(POW_ENGINE_ID, bytes)` payload = `SCALE(AccountId32)` miner id — the first 32 bytes must decode to `AccountId32` (streaming decode; any trailing bytes stay hash-covered). A block with a missing or malformed author digest is rejected client-side; rewards decode the same digest.
   - `preliminary_verify` returns `Ok(None)` (needs parent aux context — keep full verify).
   - `break_tie`: keep default `false` (earliest-seen wins).
 - `difficulty(parent)`: calls the runtime API `GhostPowApi::next_difficulty(parent_hash)`; called twice per import — implement a small memoization; on failure fall back to `PowAux` parent's difficulty.
@@ -74,11 +74,11 @@ All nodes compute difficulty identically from on-chain state — `sc-consensus-p
 
 ## 8. PQC (Dilithium5 / ML-DSA-87)
 
-- `pqc` module inside `pallet-ghost-consensus` (new file `src/pqc.rs`).
-- No_std verification via a pure-Rust verifier: first choice `pqc_dilithium` (0.5.x, no_std-capable, Dilithium5); fallback `ml-dsa` (RustCrypto). Verify `pqc_dilithium::verify(sig, msg, pk)` is deterministic and no_std; compile-gate behind the pallet's `no_std` path (no `#[cfg(feature="std")]` guards on verification — the point is it works in Wasm).
-- `register_pqc_key(pk, pop)`: `pk: [u8; 2592]`, `pop: PqcSignature([u8; 4627])` = signature over `b"GHOST-PQC-POP" || account_id`; reject if verification fails. This is proof-of-possession — prevents key-registration DoS/rogue-key issues.
-- `pqc_attest(block_hash, sig)`: bonded validator attests a finalized block hash with its registered PQC key; emits event. Attestations are informational (they do not gate finality in v1).
-- `PqcRequired` constant deleted — verification is always on where used.
+- Merged as standalone `pallets/pallet-ghost-pqc` rather than a `pqc` module inside `pallet-ghost-consensus`; `pallet-ghost-consensus` consumes it through the `PqcKeyProvider` trait.
+- No_std verification via the pure-Rust `ml-dsa` crate (RustCrypto `MlDsa87`) — the merged choice. `pqc_dilithium` was rejected: no 0.5.x release exists and 0.2.x is std-only, so it cannot verify in Wasm. No `#[cfg(feature="std")]` guards on verification — the point is it works in Wasm.
+- `register_pqc_key(public_key, proof_of_possession)`: `public_key` bounded to 2592 B, `proof_of_possession` bounded to 4627 B = ML-DSA-87 signature over `b"GHOST-PQC-POP" || SCALE(account_id)`; reject if verification fails. This is proof-of-possession — prevents key-registration DoS/rogue-key issues. One key per account; `revoke_pqc_key` frees the slot (merged).
+- `pqc_attest(block_hash, sig)`: attests a block hash with the signer's registered PQC key; emits event. Merged v1 gates on holding a registered key — the bonded-validator check is a stated TODO pending the consensus pallet's provider hook. Attestations are informational (they do not gate finality in v1).
+- `PqcRequired` is a root-set storage flag in `pallet-ghost-pqc` (merged): signature verification is always on; the flag only gates downstream validator eligibility. Supersedes the earlier "delete the constant" plan — as storage it flips without a runtime upgrade.
 - Must be benchmarked; verification weight is substantial — `pqc_attest` gets its own measured weight, and extrinsic fees reflect it.
 
 ## 9. Node service wiring (`node/src/service.rs`)
