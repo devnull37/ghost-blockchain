@@ -4,11 +4,17 @@ This document is the launch checklist and smoke-test runbook for Ghost.
 
 ## Current Snapshot
 
+State on `devin/integration`:
+
 - Native pallet tests: available.
 - Native node build: available.
 - Embedded Wasm runtime build: available when the local Substrate C toolchain is installed.
 - Aura/GRANDPA local E2E smoke test: passing via `scripts/e2e-local.sh`.
-- Live Ghost consensus path in the node service: still pending.
+- `ghost-consensus` engine crate (`consensus/ghost-consensus`): merged — `GhostPowAlgorithm` (seal verification, difficulty resolution), `HeaviestChain` fork choice, mining helpers, retarget math, `PowAux` persistence. Unit + property tests pass. **Not wired into `node/src/service.rs`** — the node still authors Aura and finalizes GRANDPA.
+- `ghost-pow-primitives` crate (`primitives/ghost-pow`): merged — `GhostSeal`, `POW_ENGINE_ID`, `GhostPowApi` declaration. **The runtime does not implement `GhostPowApi` yet.**
+- `pallet-ghost-pqc`: merged — ML-DSA-87 (FIPS-204) key registry with proof-of-possession and `pqc_attest`, no_std verifier. Unit tests pass; **not yet included in the runtime**.
+- `pallet-ghost-consensus` (in runtime, index 8): still the prototype simulation pallet — extrinsic-driven, not the block-production engine. See `docs/protocol-spec.md` §11.
+- Live Ghost consensus path in the node service: still pending (runtime v2 + service wiring workstreams in flight).
 - Full Ghost-consensus multi-node E2E testnet: not ready yet.
 
 ## Readiness Checklist
@@ -20,10 +26,13 @@ Mark each item green before calling the chain testnet-ready:
 - [x] Embedded Wasm runtime builds with documented Substrate toolchain env.
 - [x] `ghost-node --dev` boots cleanly with the embedded runtime.
 - [x] Two local Aura/GRANDPA validators can peer, author, and finalize blocks.
-- [ ] The node authors and finalizes through the Ghost consensus path.
-- [ ] Miner attribution is available for reward distribution.
+- [x] `ghost-consensus` engine crate + `ghost-pow-primitives` merged with unit/property tests.
+- [x] `pallet-ghost-pqc` merged with unit tests (ML-DSA-87, PoP registration).
+- [ ] The node authors and finalizes through the Ghost consensus path (`ghost-consensus` wired into `service.rs`; Aura removed).
+- [ ] `GhostPowApi::next_difficulty` implemented by the runtime; retarget driven by on-chain state.
+- [ ] Miner attribution is available for reward distribution (author decoded from the seal-bound pre-runtime digest).
 - [ ] Reward distribution completes end to end.
-- [ ] Dilithium5 verification works in the runtime no_std/Wasm path.
+- [ ] `pallet-ghost-pqc` is composed into the runtime and PQC verification works in the no_std/Wasm path.
 - [x] Two or more Aura/GRANDPA nodes can form a network, author blocks, finalize, and survive a validator restart.
 - [ ] Two or more Ghost-consensus nodes can form a network, author blocks, finalize, and survive a restart.
 - [ ] The launch checklist is reproducible by someone who did not help build the branch.
@@ -33,9 +42,11 @@ Mark each item green before calling the chain testnet-ready:
 Do not schedule a public testnet until all of the following are true:
 
 1. The runtime builds without the `SKIP_WASM_BUILD` workaround.
-2. The live node path uses Ghost consensus, not Aura/GRANDPA.
-3. Reward accounting is correct on chain.
-4. PQC validation works in the runtime build.
+2. The live node path uses Ghost consensus, not Aura/GRANDPA (the merged
+   `ghost-consensus` crate drives the import queue; Aura is removed).
+3. Reward accounting is correct on chain (digest-decoded author, 40/60 split).
+4. `pallet-ghost-pqc` is in the runtime and ML-DSA-87 validation works in the
+   Wasm build.
 5. A two-node smoke test passes from a clean checkout.
 
 ## Runbook
@@ -72,7 +83,7 @@ Expected result:
 - A `--dev` node authors blocks.
 - Alice and Bob local validators peer, author blocks, and finalize blocks.
 
-This validates the current Aura/GRANDPA-backed chain path. It does not validate live Ghost PoW/PoS consensus.
+This validates the current Aura/GRANDPA-backed chain path. It does not validate live Ghost PoW/PoS consensus. The merged `ghost-consensus`/`ghost-pow-primitives` crates are exercised by `cargo test -p ghost-consensus -p ghost-pow-primitives`, and `pallet-ghost-pqc` by `cargo test -p pallet-ghost-pqc`, none of which run a node.
 
 ### 3. Run the native smoke build
 

@@ -71,8 +71,8 @@ impl pallet_timestamp::Config for Test {
 // -- Switchable lookups for validate() gating ---------------------------------
 
 thread_local! {
-    static REGISTERED_KEYS: RefCell<BTreeSet<AccountId>> = RefCell::new(BTreeSet::new());
-    static PQC_KEYS: RefCell<BTreeSet<AccountId>> = RefCell::new(BTreeSet::new());
+    static REGISTERED_KEYS: RefCell<BTreeSet<AccountId>> = const { RefCell::new(BTreeSet::new()) };
+    static PQC_KEYS: RefCell<BTreeSet<AccountId>> = const { RefCell::new(BTreeSet::new()) };
     static REQUIRE_PQC: RefCell<bool> = const { RefCell::new(false) };
 }
 
@@ -186,7 +186,6 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
             (DAVE, 10_000),
             (EVE, 10_000),
         ],
-        ..Default::default()
     }
     .assimilate_storage(&mut storage)
     .unwrap();
@@ -195,7 +194,6 @@ pub fn new_test_ext() -> sp_io::TestExternalities {
         difficulty: U256::from(1_000u64),
         stakers: vec![],
         initial_validators: vec![],
-        ..Default::default()
     }
     .assimilate_storage(&mut storage)
     .unwrap();
