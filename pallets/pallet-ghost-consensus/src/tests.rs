@@ -1,582 +1,657 @@
-//! Unit tests for Ghost Consensus Pallet
+//! Tests for the Ghost consensus pallet v2: staking holds, unbonding queue,
+//! session validator selection, difficulty retarget (work-factor semantics),
+//! digest-decoded rewards, offence slashing, and the v1->v2 migration.
 
 use super::*;
+use crate::migrations::{MigrateToV2, STORAGE_VERSION};
 use crate::mock::*;
-use crate::types::*;
-use frame_support::{assert_err, assert_ok};
-use pqcrypto_dilithium::dilithium5;
-use pqcrypto_traits::sign::{DetachedSignature as _, PublicKey as _};
-use sp_core::H256;
-use sp_runtime::traits::{AccountIdConversion, BlakeTwo256, Hash};
+use frame_support::{
+    assert_noop, assert_ok,
+    storage::storage_prefix,
+    traits::{fungible::InspectHold, GetStorageVersion, Hooks, OnRuntimeUpgrade, StorageVersion},
+};
+use sp_core::U256;
+use sp_runtime::Perbill;
+use sp_staking::offence::{OffenceDetails, OnOffenceHandler};
+
+type HoldReasonStaking = crate::HoldReason;
+
+fn on_hold(who: AccountId) -> Balance {
+    <Balances as InspectHold<AccountId>>::balance_on_hold(&HoldReasonStaking::Staking.into(), &who)
+}
+
+fn slash(offenders: &[(AccountId, Balance)], fractions: &[Perbill], session: SessionIndex) {
+    let details: Vec<OffenceDetails<AccountId, (AccountId, Balance)>> = offenders
+        .iter()
+        .map(|o| OffenceDetails {
+            offender: *o,
+            reporters: vec![],
+        })
+        .collect();
+    <GhostConsensus as OnOffenceHandler<AccountId, (AccountId, Balance), Weight>>::on_offence(
+        &details, fractions, session,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Staking
+// ---------------------------------------------------------------------------
 
 #[test]
-fn test_genesis_config() {
-    run_test(|| {
-        // Check initial difficulty is set
-        let difficulty = Difficulty::<Test>::get();
-        assert_eq!(difficulty, 1_000_000_000_000u64);
-
-        // Check initial phase is PoW mining
-        let phase = CurrentPhase::<Test>::get();
-        assert_eq!(phase, ConsensusPhase::PowMining);
+fn bond_below_min_fails() {
+    new_test_ext().execute_with(|| {
+        assert_noop!(
+            GhostConsensus::bond(RuntimeOrigin::signed(ALICE), MIN_STAKE - 1),
+            Error::<Test>::BondBelowMinimum
+        );
     });
 }
 
 #[test]
-fn test_difficulty_adjustment_increase() {
-    run_test(|| {
-        let current_difficulty = 1_000_000u64;
-        let actual_block_time = 3u64; // 3 seconds (too fast)
-        let target_block_time = 5u64; // 5 seconds target
+fn bond_holds_funds_and_stays_spendable_on_account() {
+    new_test_ext().execute_with(|| {
+        assert_ok!(GhostConsensus::bond(RuntimeOrigin::signed(ALICE), 100));
+        assert_eq!(GhostConsensus::bonded(&ALICE), 100);
+        assert_eq!(on_hold(ALICE), 100);
+        // Held funds stay on the account (no transfer); free balance reports
+        // the un-held remainder.
+        assert_eq!(Balances::free_balance(ALICE), 10_000 - 100);
+        System::assert_last_event(
+            Event::Bonded {
+                who: ALICE,
+                added: 100,
+                total: 100,
+            }
+            .into(),
+        );
+    });
+}
 
-        let new_difficulty = functions::calculate_difficulty_adjustment::<Test>(
-            current_difficulty,
-            actual_block_time,
-            target_block_time,
-            4_000_000,
+#[test]
+fn bond_extra_stacks_and_respects_max() {
+    new_test_ext().execute_with(|| {
+        assert_ok!(GhostConsensus::bond(RuntimeOrigin::signed(ALICE), 100));
+        assert_ok!(GhostConsensus::bond_extra(RuntimeOrigin::signed(ALICE), 50));
+        assert_eq!(GhostConsensus::bonded(&ALICE), 150);
+        assert_eq!(on_hold(ALICE), 150);
+
+        // bond_extra on a fresh account fails.
+        assert_noop!(
+            GhostConsensus::bond_extra(RuntimeOrigin::signed(BOB), 100),
+            Error::<Test>::NotBonded
+        );
+    });
+}
+
+#[test]
+fn bond_above_max_fails() {
+    new_test_ext().execute_with(|| {
+        assert_noop!(
+            GhostConsensus::bond(RuntimeOrigin::signed(ALICE), MAX_STAKE + 1),
+            Error::<Test>::BondAboveMaximum
+        );
+        assert_ok!(GhostConsensus::bond(RuntimeOrigin::signed(ALICE), 100));
+        assert_noop!(
+            GhostConsensus::bond_extra(RuntimeOrigin::signed(ALICE), MAX_STAKE),
+            Error::<Test>::BondAboveMaximum
+        );
+    });
+}
+
+#[test]
+fn unbond_queues_chunk_and_withdraw_releases_after_period() {
+    new_test_ext().execute_with(|| {
+        assert_ok!(GhostConsensus::bond(RuntimeOrigin::signed(ALICE), 200));
+        assert_ok!(GhostConsensus::unbond(RuntimeOrigin::signed(ALICE), 50));
+
+        assert_eq!(GhostConsensus::bonded(&ALICE), 150);
+        assert_eq!(on_hold(ALICE), 200); // still held while unbonding
+        let chunks = crate::Unbonding::<Test>::get(ALICE);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].amount, 50);
+        assert_eq!(chunks[0].unlock_at, 1 + UNBONDING_PERIOD);
+
+        // Too early -> NothingToWithdraw.
+        assert_noop!(
+            GhostConsensus::withdraw_unbonded(RuntimeOrigin::signed(ALICE)),
+            Error::<Test>::NothingToWithdraw
         );
 
-        // The accepted target should decrease since blocks are too fast.
-        assert!(new_difficulty < current_difficulty);
-        assert_eq!(new_difficulty, 600_000u64);
-    });
-}
-
-#[test]
-fn test_difficulty_adjustment_decrease() {
-    run_test(|| {
-        let current_difficulty = 1_000_000u64;
-        let actual_block_time = 10u64; // 10 seconds (too slow)
-        let target_block_time = 5u64; // 5 seconds target
-
-        let new_difficulty = functions::calculate_difficulty_adjustment::<Test>(
-            current_difficulty,
-            actual_block_time,
-            target_block_time,
-            4_000_000,
+        // After the unbonding period, withdraw releases the hold.
+        System::set_block_number(1 + UNBONDING_PERIOD);
+        assert_ok!(GhostConsensus::withdraw_unbonded(RuntimeOrigin::signed(
+            ALICE
+        )));
+        assert_eq!(on_hold(ALICE), 150);
+        assert!(crate::Unbonding::<Test>::get(ALICE).is_empty());
+        System::assert_last_event(
+            Event::WithdrawnUnbonded {
+                who: ALICE,
+                amount: 50,
+            }
+            .into(),
         );
-
-        // The accepted target should increase since blocks are too slow.
-        assert!(new_difficulty > current_difficulty);
-        assert_eq!(new_difficulty, 2_000_000u64);
     });
 }
 
 #[test]
-fn test_pow_verification_enhanced() {
-    run_test(|| {
-        // Create a block header with a low difficulty to make testing easier
-        let mut header = create_block_header(1, 0);
-        header.difficulty = u64::MAX; // Very easy difficulty
-
-        // This should pass with a high difficulty
-        assert!(functions::verify_pow_enhanced(&header, u64::MAX));
-
-        // Test with impossible difficulty (should fail)
-        assert!(!functions::verify_pow_enhanced(&header, 1));
+fn unbond_full_amount_removes_bonded_entry() {
+    new_test_ext().execute_with(|| {
+        assert_ok!(GhostConsensus::bond(RuntimeOrigin::signed(ALICE), 100));
+        assert_ok!(GhostConsensus::unbond(RuntimeOrigin::signed(ALICE), 100));
+        assert_eq!(GhostConsensus::bonded(&ALICE), 0);
+        assert_noop!(
+            GhostConsensus::unbond(RuntimeOrigin::signed(ALICE), 1),
+            Error::<Test>::NotBonded
+        );
     });
 }
 
 #[test]
-fn test_staking_basic() {
-    run_test(|| {
-        let staker = 1u64; // Alice
-        let stake_amount = 10_000_000_000_000_000_000u128; // 10 GHOST
+fn unbonding_queue_is_bounded() {
+    new_test_ext().execute_with(|| {
+        assert_ok!(GhostConsensus::bond(RuntimeOrigin::signed(ALICE), 400));
+        for _ in 0..4 {
+            assert_ok!(GhostConsensus::unbond(RuntimeOrigin::signed(ALICE), 10));
+        }
+        assert_noop!(
+            GhostConsensus::unbond(RuntimeOrigin::signed(ALICE), 10),
+            Error::<Test>::TooManyUnbondingChunks
+        );
+        // Withdrawing matured chunks frees queue slots.
+        System::set_block_number(1 + UNBONDING_PERIOD);
+        assert_ok!(GhostConsensus::withdraw_unbonded(RuntimeOrigin::signed(
+            ALICE
+        )));
+        assert_ok!(GhostConsensus::unbond(RuntimeOrigin::signed(ALICE), 10));
+    });
+}
 
-        // Stake tokens
-        assert_ok!(GhostConsensus::stake(
-            RuntimeOrigin::signed(staker),
-            stake_amount
+// ---------------------------------------------------------------------------
+// Candidates / validate / chill
+// ---------------------------------------------------------------------------
+
+#[test]
+fn validate_requires_min_stake_keys_and_pqc() {
+    new_test_ext().execute_with(|| {
+        // Bonded but below the minimum after a partial unbond.
+        assert_ok!(GhostConsensus::bond(
+            RuntimeOrigin::signed(ALICE),
+            MIN_STAKE
         ));
+        assert_ok!(GhostConsensus::unbond(RuntimeOrigin::signed(ALICE), 1));
+        assert_eq!(GhostConsensus::bonded(&ALICE), MIN_STAKE - 1);
+        set_keys_registered(ALICE, true);
+        assert_noop!(
+            GhostConsensus::validate(RuntimeOrigin::signed(ALICE)),
+            Error::<Test>::BondBelowMinimum
+        );
 
-        // Check stake was recorded
-        let recorded_stake = ValidatorStakes::<Test>::get(staker);
-        assert!(recorded_stake.is_some());
-        assert_eq!(recorded_stake.unwrap(), stake_amount);
+        // Enough stake but no session keys.
+        System::set_block_number(1 + UNBONDING_PERIOD);
+        assert_ok!(GhostConsensus::withdraw_unbonded(RuntimeOrigin::signed(
+            ALICE
+        )));
+        assert_ok!(GhostConsensus::bond_extra(RuntimeOrigin::signed(ALICE), 1));
+        assert_eq!(GhostConsensus::bonded(&ALICE), MIN_STAKE);
+        set_keys_registered(ALICE, false);
+        assert_noop!(
+            GhostConsensus::validate(RuntimeOrigin::signed(ALICE)),
+            Error::<Test>::KeysNotRegistered
+        );
 
-        let escrow: u64 = GhostPalletId::get().into_account_truncating();
+        // PQC gate enforced when RequirePqcKey is on.
+        set_keys_registered(ALICE, true);
+        set_require_pqc(true);
+        assert_noop!(
+            GhostConsensus::validate(RuntimeOrigin::signed(ALICE)),
+            Error::<Test>::PqcKeyRequired
+        );
+
+        set_pqc_key(ALICE, true);
+        assert_ok!(GhostConsensus::validate(RuntimeOrigin::signed(ALICE)));
+        assert!(crate::Candidates::<Test>::get().contains(&ALICE));
+
+        assert_noop!(
+            GhostConsensus::validate(RuntimeOrigin::signed(ALICE)),
+            Error::<Test>::AlreadyCandidate
+        );
+    });
+}
+
+#[test]
+fn chill_removes_candidate() {
+    new_test_ext().execute_with(|| {
+        assert_ok!(GhostConsensus::bond(RuntimeOrigin::signed(ALICE), 100));
+        set_keys_registered(ALICE, true);
+        assert_ok!(GhostConsensus::validate(RuntimeOrigin::signed(ALICE)));
+        assert_ok!(GhostConsensus::chill(RuntimeOrigin::signed(ALICE)));
+        assert!(!crate::Candidates::<Test>::get().contains(&ALICE));
+        assert_noop!(
+            GhostConsensus::chill(RuntimeOrigin::signed(ALICE)),
+            Error::<Test>::NotCandidate
+        );
+    });
+}
+
+// ---------------------------------------------------------------------------
+// SessionManager
+// ---------------------------------------------------------------------------
+
+fn bond_and_validate(who: AccountId, amount: Balance) {
+    assert_ok!(GhostConsensus::bond(RuntimeOrigin::signed(who), amount));
+    set_keys_registered(who, true);
+    assert_ok!(GhostConsensus::validate(RuntimeOrigin::signed(who)));
+}
+
+#[test]
+fn new_session_selects_top_n_by_stake_with_tiebreak() {
+    new_test_ext().execute_with(|| {
+        bond_and_validate(ALICE, 100);
+        bond_and_validate(BOB, 300);
+        bond_and_validate(CHARLIE, 100); // ties ALICE; lower id wins
+        bond_and_validate(DAVE, 200);
+        bond_and_validate(EVE, 50); // below the rest, drops off
+
+        let set =
+            <GhostConsensus as pallet_session::SessionManager<AccountId>>::new_session_genesis(0)
+                .unwrap();
+        // MaxValidators = 3; stakes 300/200/100 tie-broken ALICE < CHARLIE.
+        assert_eq!(set, vec![BOB, DAVE, ALICE]);
+    });
+}
+
+#[test]
+fn new_session_genesis_falls_back_to_initial_validators() {
+    new_test_ext().execute_with(|| {
+        crate::InitialValidators::<Test>::put(BoundedVec::<u64, ConstU32<3>>::truncate_from(vec![
+            DAVE, EVE,
+        ]));
+        let set =
+            <GhostConsensus as pallet_session::SessionManager<AccountId>>::new_session_genesis(0)
+                .unwrap();
+        assert_eq!(set, vec![DAVE, EVE]);
+    });
+}
+
+#[test]
+fn session_lifecycle_tracks_active_validators() {
+    new_test_ext().execute_with(|| {
+        bond_and_validate(ALICE, 100);
+        bond_and_validate(BOB, 200);
+
+        // Genesis selection populates pending.
+        let set =
+            <GhostConsensus as pallet_session::SessionManager<AccountId>>::new_session_genesis(0)
+                .unwrap();
+        assert_eq!(set, vec![BOB, ALICE]);
+
+        <GhostConsensus as pallet_session::SessionManager<AccountId>>::start_session(0);
         assert_eq!(
-            pallet_balances::Pallet::<Test>::free_balance(staker),
-            90_000_000_000_000_000_000
+            crate::ActiveValidators::<Test>::get().into_inner(),
+            vec![BOB, ALICE]
         );
+
+        // Same set recomputed -> None (no gratuitous GRANDPA change).
         assert_eq!(
-            pallet_balances::Pallet::<Test>::free_balance(escrow),
-            stake_amount
+            <GhostConsensus as pallet_session::SessionManager<AccountId>>::new_session(1),
+            None
         );
-    });
-}
 
-#[test]
-fn test_staking_escrow_and_unstaking_returns_funds() {
-    run_test(|| {
-        let staker = 1u64;
-        let stake_amount = 10_000_000_000_000_000_000u128;
-        let unstake_amount = 4_000_000_000_000_000_000u128;
-        let escrow: u64 = GhostPalletId::get().into_account_truncating();
-
-        assert_ok!(GhostConsensus::stake(
-            RuntimeOrigin::signed(staker),
-            stake_amount
-        ));
-
+        // New candidate with bigger bond changes the set.
+        bond_and_validate(CHARLIE, 400);
         assert_eq!(
-            pallet_balances::Pallet::<Test>::free_balance(staker),
-            90_000_000_000_000_000_000
+            <GhostConsensus as pallet_session::SessionManager<AccountId>>::new_session(2),
+            Some(vec![CHARLIE, BOB, ALICE])
         );
+    });
+}
+
+#[test]
+fn historical_session_manager_carries_bond() {
+    new_test_ext().execute_with(|| {
+        bond_and_validate(ALICE, 100);
+        let set = <GhostConsensus as pallet_session::historical::SessionManager<
+            AccountId,
+            Balance,
+        >>::new_session_genesis(0)
+        .unwrap();
+        assert_eq!(set, vec![(ALICE, 100)]);
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Difficulty retarget (work factor: larger = harder)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn first_retarget_boundary_only_sets_baseline() {
+    new_test_ext().execute_with(|| {
+        assert_eq!(crate::Difficulty::<Test>::get(), U256::from(1_000u64));
+        run_to_block(RETARGET_INTERVAL, TARGET_BLOCK_TIME_MS);
+        assert_eq!(crate::Difficulty::<Test>::get(), U256::from(1_000u64));
+        assert_eq!(crate::RetargetsDone::<Test>::get(), 1);
+        // 99 deltas elapsed when block 100 runs on_initialize.
         assert_eq!(
-            pallet_balances::Pallet::<Test>::free_balance(escrow),
-            stake_amount
+            crate::LastRetargetTime::<Test>::get(),
+            99 * TARGET_BLOCK_TIME_MS
         );
+    });
+}
 
-        assert_ok!(GhostConsensus::unstake(
-            RuntimeOrigin::signed(staker),
-            unstake_amount
+#[test]
+fn blocks_too_fast_increase_difficulty() {
+    new_test_ext().execute_with(|| {
+        // First interval at target -> baseline only.
+        run_to_block(RETARGET_INTERVAL, TARGET_BLOCK_TIME_MS);
+        // Second interval twice as fast -> difficulty doubles.
+        run_to_block(2 * RETARGET_INTERVAL, TARGET_BLOCK_TIME_MS / 2);
+        assert_eq!(crate::Difficulty::<Test>::get(), U256::from(2_000u64));
+    });
+}
+
+#[test]
+fn blocks_too_slow_decrease_difficulty() {
+    new_test_ext().execute_with(|| {
+        run_to_block(RETARGET_INTERVAL, TARGET_BLOCK_TIME_MS);
+        // Twice as slow -> difficulty halves.
+        run_to_block(2 * RETARGET_INTERVAL, TARGET_BLOCK_TIME_MS * 2);
+        assert_eq!(crate::Difficulty::<Test>::get(), U256::from(500u64));
+    });
+}
+
+#[test]
+fn retarget_clamps_at_factor_4() {
+    new_test_ext().execute_with(|| {
+        run_to_block(RETARGET_INTERVAL, TARGET_BLOCK_TIME_MS);
+        // 100x too fast -> clamped to 4x, not 100x.
+        run_to_block(2 * RETARGET_INTERVAL, TARGET_BLOCK_TIME_MS / 100);
+        assert_eq!(crate::Difficulty::<Test>::get(), U256::from(4_000u64));
+        // 100x too slow -> clamped to /4.
+        run_to_block(3 * RETARGET_INTERVAL, TARGET_BLOCK_TIME_MS * 100);
+        assert_eq!(crate::Difficulty::<Test>::get(), U256::from(1_000u64));
+    });
+}
+
+#[test]
+fn retarget_floors_at_min_difficulty() {
+    new_test_ext().execute_with(|| {
+        crate::Difficulty::<Test>::put(U256::from(101u64)); // just above min 100
+        run_to_block(RETARGET_INTERVAL, TARGET_BLOCK_TIME_MS);
+        // 5x too slow -> raw would be ~20, clamp /4 -> 25, floor -> 100.
+        run_to_block(2 * RETARGET_INTERVAL, TARGET_BLOCK_TIME_MS * 5);
+        assert_eq!(crate::Difficulty::<Test>::get(), U256::from(100u64));
+    });
+}
+
+#[test]
+fn zero_elapsed_retargets_max_up() {
+    new_test_ext().execute_with(|| {
+        run_to_block(RETARGET_INTERVAL, TARGET_BLOCK_TIME_MS);
+        // No time elapsed between boundaries -> clamp max-up (4x).
+        run_to_block(2 * RETARGET_INTERVAL, 0);
+        assert_eq!(crate::Difficulty::<Test>::get(), U256::from(4_000u64));
+    });
+}
+
+#[test]
+fn next_difficulty_returns_work_factor() {
+    new_test_ext().execute_with(|| {
+        assert_eq!(GhostConsensus::next_difficulty(), U256::from(1_000u64));
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Rewards
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reward_splits_40_author_60_validators_prorata() {
+    new_test_ext().execute_with(|| {
+        bond_and_validate(ALICE, 100);
+        bond_and_validate(BOB, 300);
+        // Activate the session set {BOB 300, ALICE 100}.
+        <GhostConsensus as pallet_session::SessionManager<AccountId>>::new_session_genesis(0);
+        <GhostConsensus as pallet_session::SessionManager<AccountId>>::start_session(0);
+
+        // CHARLIE mines the block (not a validator).
+        set_author(CHARLIE);
+        <GhostConsensus as Hooks<u64>>::on_finalize(System::block_number());
+
+        // 100 reward: author 40 + pro-rata dust; validators 60 => BOB 45, ALICE 15.
+        assert_eq!(Balances::free_balance(CHARLIE), 10_000 + 40);
+        // Validator balances = endowed + share - bonded hold.
+        assert_eq!(Balances::free_balance(BOB), 10_000 + 45 - 300);
+        assert_eq!(Balances::free_balance(ALICE), 10_000 + 15 - 100);
+        assert!(crate::RecentAuthors::<Test>::get().contains(&CHARLIE));
+    });
+}
+
+#[test]
+fn reward_with_no_validators_goes_to_reserve() {
+    new_test_ext().execute_with(|| {
+        set_author(ALICE);
+        <GhostConsensus as Hooks<u64>>::on_finalize(System::block_number());
+        // 60% -> pallet reserve account; author still gets 40%.
+        assert_eq!(Balances::free_balance(ALICE), 10_000 + 40);
+        assert_eq!(Balances::free_balance(GhostConsensus::account_id()), 60);
+    });
+}
+
+#[test]
+fn reward_rounding_remainder_goes_to_author() {
+    new_test_ext().execute_with(|| {
+        // BlockReward=100 -> author 40, validators pot 60. Three equal-stake
+        // validators get 20 each; if weights made it uneven the author would
+        // pick up the floor-division dust.
+        bond_and_validate(ALICE, MIN_STAKE);
+        bond_and_validate(BOB, MIN_STAKE);
+        bond_and_validate(CHARLIE, MIN_STAKE);
+        <GhostConsensus as pallet_session::SessionManager<AccountId>>::new_session_genesis(0);
+        <GhostConsensus as pallet_session::SessionManager<AccountId>>::start_session(0);
+
+        let before: Balance = [ALICE, BOB, CHARLIE, DAVE]
+            .iter()
+            .map(|a| Balances::free_balance(a))
+            .sum();
+        set_author(DAVE);
+        <GhostConsensus as Hooks<u64>>::on_finalize(System::block_number());
+        let after: Balance = [ALICE, BOB, CHARLIE, DAVE]
+            .iter()
+            .map(|a| Balances::free_balance(a))
+            .sum();
+        // No dust lost: total minted == BlockReward, all to accounts.
+        assert_eq!(after - before, BLOCK_REWARD);
+    });
+}
+
+#[test]
+fn reward_skips_when_no_pow_digest() {
+    new_test_ext().execute_with(|| {
+        <GhostConsensus as Hooks<u64>>::on_finalize(System::block_number());
+        System::assert_last_event(
+            Event::BlockRewardSkipped {
+                block_number: System::block_number(),
+            }
+            .into(),
+        );
+        assert!(crate::RecentAuthors::<Test>::get().is_empty());
+    });
+}
+
+#[test]
+fn reward_skips_when_digest_malformed() {
+    new_test_ext().execute_with(|| {
+        // pow_ pre-runtime item whose payload does not decode to AccountId.
+        System::deposit_log(sp_runtime::DigestItem::PreRuntime(
+            POW_ENGINE_ID,
+            vec![0xde, 0xad],
         ));
-
-        assert_eq!(
-            ValidatorStakes::<Test>::get(staker).unwrap(),
-            stake_amount - unstake_amount
-        );
-        assert_eq!(
-            pallet_balances::Pallet::<Test>::free_balance(staker),
-            94_000_000_000_000_000_000
-        );
-        assert_eq!(
-            pallet_balances::Pallet::<Test>::free_balance(escrow),
-            stake_amount - unstake_amount
+        <GhostConsensus as Hooks<u64>>::on_finalize(System::block_number());
+        System::assert_last_event(
+            Event::BlockRewardSkipped {
+                block_number: System::block_number(),
+            }
+            .into(),
         );
     });
 }
 
 #[test]
-fn test_staking_below_minimum() {
-    run_test(|| {
-        let staker = 1u64; // Alice
-        let stake_amount = 500_000_000_000_000_000u128; // 0.5 GHOST (below minimum)
-
-        // Should fail because stake is below minimum
-        assert_err!(
-            GhostConsensus::stake(RuntimeOrigin::signed(staker), stake_amount),
-            Error::<Test>::InsufficientStake
+fn reward_ignores_unrelated_preruntime_digests() {
+    new_test_ext().execute_with(|| {
+        System::deposit_log(sp_runtime::DigestItem::PreRuntime(*b"othr", ALICE.encode()));
+        <GhostConsensus as Hooks<u64>>::on_finalize(System::block_number());
+        System::assert_last_event(
+            Event::BlockRewardSkipped {
+                block_number: System::block_number(),
+            }
+            .into(),
         );
     });
 }
 
+// ---------------------------------------------------------------------------
+// Slashing (OnOffenceHandler)
+// ---------------------------------------------------------------------------
+
 #[test]
-fn test_staking_multiple_times() {
-    run_test(|| {
-        let staker = 1u64; // Alice
-        let first_stake = 5_000_000_000_000_000_000u128; // 5 GHOST
-        let second_stake = 3_000_000_000_000_000_000u128; // 3 GHOST
+fn on_offence_slashes_burns_chills_and_records() {
+    new_test_ext().execute_with(|| {
+        bond_and_validate(ALICE, 400);
+        <GhostConsensus as pallet_session::SessionManager<AccountId>>::new_session_genesis(0);
+        <GhostConsensus as pallet_session::SessionManager<AccountId>>::start_session(0);
+        let issuance_before = Balances::total_issuance();
 
-        // First stake
-        assert_ok!(GhostConsensus::stake(
-            RuntimeOrigin::signed(staker),
-            first_stake
-        ));
+        slash(&[(ALICE, 400)], &[Perbill::from_percent(25)], 7);
 
-        // Second stake
-        assert_ok!(GhostConsensus::stake(
-            RuntimeOrigin::signed(staker),
-            second_stake
-        ));
+        // 25% of 400 burned: hold reduced, issuance reduced, record appended.
+        assert_eq!(GhostConsensus::bonded(&ALICE), 300);
+        assert_eq!(on_hold(ALICE), 300);
+        assert_eq!(Balances::total_issuance(), issuance_before - 100);
+        assert!(!crate::Candidates::<Test>::get().contains(&ALICE));
+        assert!(!crate::ActiveValidators::<Test>::get().contains(&ALICE));
 
-        // Check total stake
-        let total_stake = ValidatorStakes::<Test>::get(staker).unwrap();
-        assert_eq!(total_stake, first_stake + second_stake);
+        let records = crate::SlashRecords::<Test>::get();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].who, ALICE);
+        assert_eq!(records[0].amount, 100);
+        assert_eq!(records[0].session_index, 7);
     });
 }
 
 #[test]
-fn test_unstaking_basic() {
-    run_test(|| {
-        let staker = 1u64; // Alice
-        let stake_amount = 10_000_000_000_000_000_000u128; // 10 GHOST
-        let unstake_amount = 3_000_000_000_000_000_000u128; // 3 GHOST
-
-        // Stake first
-        assert_ok!(GhostConsensus::stake(
-            RuntimeOrigin::signed(staker),
-            stake_amount
-        ));
-
-        // Unstake partial amount
-        assert_ok!(GhostConsensus::unstake(
-            RuntimeOrigin::signed(staker),
-            unstake_amount
-        ));
-
-        // Check remaining stake
-        let remaining_stake = ValidatorStakes::<Test>::get(staker).unwrap();
-        assert_eq!(remaining_stake, stake_amount - unstake_amount);
+fn on_offence_skips_accounts_with_no_bond() {
+    new_test_ext().execute_with(|| {
+        slash(&[(EVE, 0)], &[Perbill::from_percent(50)], 1);
+        assert!(crate::SlashRecords::<Test>::get().is_empty());
     });
 }
 
 #[test]
-fn test_unstaking_without_stake() {
-    run_test(|| {
-        let staker = 1u64; // Alice
-        let unstake_amount = 1_000_000_000_000_000_000u128; // 1 GHOST
-
-        // Try to unstake without staking first
-        assert_err!(
-            GhostConsensus::unstake(RuntimeOrigin::signed(staker), unstake_amount),
-            Error::<Test>::NotAValidator
+fn on_offence_applies_fraction_per_offender() {
+    new_test_ext().execute_with(|| {
+        bond_and_validate(ALICE, 100);
+        bond_and_validate(BOB, 200);
+        slash(
+            &[(ALICE, 100), (BOB, 200)],
+            &[Perbill::from_percent(10), Perbill::from_percent(50)],
+            3,
         );
+        assert_eq!(GhostConsensus::bonded(&ALICE), 90);
+        assert_eq!(GhostConsensus::bonded(&BOB), 100);
+        assert_eq!(crate::SlashRecords::<Test>::get().len(), 2);
     });
 }
 
-#[test]
-fn test_unstaking_more_than_staked() {
-    run_test(|| {
-        let staker = 1u64; // Alice
-        let stake_amount = 5_000_000_000_000_000_000u128; // 5 GHOST
-        let unstake_amount = 10_000_000_000_000_000_000u128; // 10 GHOST (more than staked)
-
-        // Stake first
-        assert_ok!(GhostConsensus::stake(
-            RuntimeOrigin::signed(staker),
-            stake_amount
-        ));
-
-        // Try to unstake more than staked
-        assert_err!(
-            GhostConsensus::unstake(RuntimeOrigin::signed(staker), unstake_amount),
-            Error::<Test>::InsufficientStake
-        );
-    });
-}
+// ---------------------------------------------------------------------------
+// Migration v1 -> v2
+// ---------------------------------------------------------------------------
 
 #[test]
-fn test_validator_selection_weighted() {
-    run_test(|| {
-        // Create validators with different stakes
-        let stakers = vec![
-            ValidatorStake {
-                account: 1u64,
-                stake: 50_000_000_000_000_000_000u128, // 50 GHOST
-                weight: 50,
-            },
-            ValidatorStake {
-                account: 2u64,
-                stake: 30_000_000_000_000_000_000u128, // 30 GHOST
-                weight: 30,
-            },
-            ValidatorStake {
-                account: 3u64,
-                stake: 20_000_000_000_000_000_000u128, // 20 GHOST
-                weight: 20,
-            },
-        ];
+fn migration_clears_all_legacy_storage() {
+    new_test_ext().execute_with(|| {
+        let pallet_prefix =
+            <GhostConsensus as frame_support::traits::PalletInfoAccess>::name().as_bytes();
 
-        let seed = H256::from_low_u64_be(12345);
-        let selection = functions::select_pos_validator::<Test>(stakers, seed);
-
-        assert!(selection.is_some());
-        let selected = selection.unwrap();
-        assert!(selected.validator >= 1 && selected.validator <= 3);
-        assert!(selected.weight > 0);
-    });
-}
-
-#[test]
-fn test_validator_selection_empty() {
-    run_test(|| {
-        let stakers: Vec<ValidatorStake<u64, u128>> = vec![];
-        let seed = H256::from_low_u64_be(12345);
-        let selection = functions::select_pos_validator::<Test>(stakers, seed);
-
-        assert!(selection.is_none());
-    });
-}
-
-#[test]
-fn test_block_reward_calculation() {
-    run_test(|| {
-        let total_reward = 10_000_000_000_000_000_000u128; // 10 GHOST
-        let reward = functions::calculate_block_reward::<Test>(total_reward);
-
-        // 40% to miner
-        assert_eq!(reward.miner_reward, 4_000_000_000_000_000_000u128);
-        // 60% to stakers
-        assert_eq!(reward.stakers_reward, 6_000_000_000_000_000_000u128);
-        // Total should match
-        assert_eq!(reward.total, total_reward);
-        assert_eq!(reward.miner_reward + reward.stakers_reward, total_reward);
-    });
-}
-
-#[test]
-fn test_block_header_validation_sequence() {
-    run_test(|| {
-        let parent_header = create_block_header(0, 100);
-        let mut child_header = create_block_header(1, 200);
-        child_header.parent_hash = BlakeTwo256::hash_of(&parent_header);
-        child_header.difficulty = 1_000_000_000_000u64;
-
-        // Store parent header
-        BlockHeaders::<Test>::insert(0, parent_header.clone());
-
-        // This may fail on PoW depending on the nonce, but should not panic.
-        let _ = functions::validate_block_header::<Test>(&child_header, &parent_header);
-    });
-}
-
-#[test]
-fn test_block_header_validation_wrong_number() {
-    run_test(|| {
-        let parent_header = create_block_header(0, 100);
-        let mut child_header = create_block_header(5, 200); // Wrong number (should be 1)
-        child_header.parent_hash = BlakeTwo256::hash_of(&parent_header);
-
-        BlockHeaders::<Test>::insert(0, parent_header.clone());
-
-        assert_err!(
-            functions::validate_block_header::<Test>(&child_header, &parent_header),
-            Error::<Test>::InvalidBlockNumber
-        );
-    });
-}
-
-#[test]
-fn test_block_header_validation_wrong_parent() {
-    run_test(|| {
-        let parent_header = create_block_header(0, 100);
-        let mut child_header = create_block_header(1, 200);
-        child_header.parent_hash = H256::zero(); // Wrong parent hash
-
-        BlockHeaders::<Test>::insert(0, parent_header.clone());
-
-        assert_err!(
-            functions::validate_block_header::<Test>(&child_header, &parent_header),
-            Error::<Test>::InvalidParentHash
-        );
-    });
-}
-
-#[test]
-fn test_phase_transitions() {
-    run_test(|| {
-        // Start in PoW mining phase
-        assert_eq!(CurrentPhase::<Test>::get(), ConsensusPhase::PowMining);
-
-        // Transition to PoS validation
-        CurrentPhase::<Test>::put(ConsensusPhase::PosValidation);
-        assert_eq!(CurrentPhase::<Test>::get(), ConsensusPhase::PosValidation);
-
-        // Transition to finalization
-        CurrentPhase::<Test>::put(ConsensusPhase::Finalization);
-        assert_eq!(CurrentPhase::<Test>::get(), ConsensusPhase::Finalization);
-
-        // Back to PoW mining
-        CurrentPhase::<Test>::put(ConsensusPhase::PowMining);
-        assert_eq!(CurrentPhase::<Test>::get(), ConsensusPhase::PowMining);
-    });
-}
-
-#[test]
-fn test_submit_block_tracks_miner_and_validate_block_distributes_rewards() {
-    run_test(|| {
-        let miner = 1u64;
-        let validator = 2u64;
-        let block_number = 1u32;
-        let total_reward = crate::types::BlockReward::<u128> {
-            total: 10_000_000_000_000_000_000u128,
-            miner_reward: 4_000_000_000_000_000_000u128,
-            stakers_reward: 6_000_000_000_000_000_000u128,
-        };
-
-        Difficulty::<Test>::put(u64::MAX);
-        CurrentPhase::<Test>::put(ConsensusPhase::PowMining);
-
-        assert_ok!(GhostConsensus::stake(
-            RuntimeOrigin::signed(validator),
-            10_000_000_000_000_000_000u128
-        ));
-
-        let (pk, sk) = dilithium5::keypair();
-        let public_key: [u8; 2592] = pk.as_bytes().try_into().unwrap();
-        assert_ok!(GhostConsensus::register_pqc_key(
-            RuntimeOrigin::signed(validator),
-            public_key
-        ));
-
-        let parent_header = create_block_header(0, 99);
-        BlockHeaders::<Test>::insert(0, parent_header.clone());
-
-        let mut child_header = create_block_header(block_number, 123);
-        child_header.parent_hash = BlakeTwo256::hash_of(&parent_header);
-        child_header.difficulty = u64::MAX;
-
-        let escrow: u64 = GhostPalletId::get().into_account_truncating();
-        assert_eq!(
-            pallet_balances::Pallet::<Test>::free_balance(escrow),
-            10_000_000_000_000_000_000u128
-        );
-
-        assert_ok!(GhostConsensus::submit_block(
-            RuntimeOrigin::signed(miner),
-            child_header.clone()
-        ));
-        assert_eq!(BlockProducers::<Test>::get(block_number), Some(miner));
-        assert_eq!(CurrentPhase::<Test>::get(), ConsensusPhase::PosValidation);
-
-        let message = BlakeTwo256::hash_of(&(validator, block_number));
-        let signature = dilithium5::detached_sign(message.as_bytes(), &sk);
-        let mut sig_bytes = [0u8; 4627];
-        sig_bytes.copy_from_slice(signature.as_bytes());
-        let pqc_signature = PqcSignature(sig_bytes);
-
-        let miner_balance_before = pallet_balances::Pallet::<Test>::free_balance(miner);
-        let validator_balance_before = pallet_balances::Pallet::<Test>::free_balance(validator);
-
-        assert_ok!(GhostConsensus::validate_block(
-            RuntimeOrigin::signed(validator),
-            block_number,
-            pqc_signature
-        ));
-
-        assert_eq!(CurrentPhase::<Test>::get(), ConsensusPhase::Finalization);
-        assert!(BlockHeaders::<Test>::get(block_number)
-            .unwrap()
-            .validator_signature
-            .is_some());
-        assert_eq!(BlockProducers::<Test>::get(block_number), Some(miner));
-        assert_eq!(
-            pallet_balances::Pallet::<Test>::free_balance(miner),
-            miner_balance_before + total_reward.miner_reward
-        );
-        assert_eq!(
-            pallet_balances::Pallet::<Test>::free_balance(validator),
-            validator_balance_before + total_reward.stakers_reward
-        );
-        assert_eq!(
-            pallet_balances::Pallet::<Test>::free_balance(escrow),
-            10_000_000_000_000_000_000u128
-        );
-    });
-}
-
-#[test]
-fn test_multiple_validators_staking() {
-    run_test(|| {
-        // Multiple validators stake different amounts
-        let validators = vec![
-            (1u64, 10_000_000_000_000_000_000u128), // Alice: 10 GHOST
-            (2u64, 20_000_000_000_000_000_000u128), // Bob: 20 GHOST
-            (3u64, 15_000_000_000_000_000_000u128), // Charlie: 15 GHOST
-        ];
-
-        for (validator, amount) in validators.iter() {
-            assert_ok!(GhostConsensus::stake(
-                RuntimeOrigin::signed(*validator),
-                *amount
-            ));
+        // Populate every legacy v1 item with junk bytes.
+        for item in [
+            b"Difficulty".as_slice(),
+            b"CurrentPhase".as_slice(),
+            b"SlashingRecords".as_slice(),
+            b"RecentBlockProducers".as_slice(),
+            b"CurrentEntropy".as_slice(),
+        ] {
+            sp_io::storage::set(&storage_prefix(pallet_prefix, item), &[0xaa; 32]);
+        }
+        for item in [
+            b"BlockHeaders".as_slice(),
+            b"BlockProducers".as_slice(),
+            b"ValidatorStakes".as_slice(),
+            b"LastActiveBlock".as_slice(),
+            b"DoubleSignReports".as_slice(),
+            b"InvalidBlockReports".as_slice(),
+            b"ValidatorPqcPublicKeys".as_slice(),
+        ] {
+            let prefix = storage_prefix(pallet_prefix, item);
+            sp_io::storage::set(
+                &[
+                    &prefix[..],
+                    &sp_io::hashing::blake2_128(&[1u8])[..],
+                    &[1u8][..],
+                ]
+                .concat(),
+                &[0xbb; 8],
+            );
         }
 
-        // Verify all stakes are recorded
-        for (validator, amount) in validators.iter() {
-            let stake = ValidatorStakes::<Test>::get(validator).unwrap();
-            assert_eq!(stake, *amount);
+        // Pretend chain is on v1.
+        StorageVersion::new(1).put::<GhostConsensus>();
+        assert_eq!(GhostConsensus::on_chain_storage_version(), 1);
+
+        MigrateToV2::<Test>::on_runtime_upgrade();
+
+        assert_eq!(GhostConsensus::on_chain_storage_version(), STORAGE_VERSION);
+        // Values cleared.
+        for item in [
+            b"Difficulty".as_slice(),
+            b"CurrentPhase".as_slice(),
+            b"SlashingRecords".as_slice(),
+            b"RecentBlockProducers".as_slice(),
+            b"CurrentEntropy".as_slice(),
+        ] {
+            // "Difficulty" was repopulated by the migration seed; check it
+            // reads as a valid v2 U256 work factor, not v1 junk.
+            if item == b"Difficulty".as_slice() {
+                continue;
+            }
+            assert_eq!(
+                sp_io::storage::get(&storage_prefix(pallet_prefix, item)),
+                None
+            );
         }
+        assert_eq!(crate::Difficulty::<Test>::get(), U256::from(100u64));
+        // Map entries cleared.
+        let prefix = storage_prefix(pallet_prefix, b"BlockHeaders");
+        let key = [
+            &prefix[..],
+            &sp_io::hashing::blake2_128(&[1u8])[..],
+            &[1u8][..],
+        ]
+        .concat();
+        assert_eq!(sp_io::storage::get(&key), None);
     });
 }
 
 #[test]
-fn test_last_active_block_tracking() {
-    run_test(|| {
-        let validator = 1u64;
-        let block_number = 100u32;
-
-        LastActiveBlock::<Test>::insert(validator, block_number);
-
-        let last_active = LastActiveBlock::<Test>::get(validator);
-        assert_eq!(last_active, block_number);
-    });
-}
-
-#[test]
-fn test_difficulty_storage() {
-    run_test(|| {
-        let new_difficulty = 5_000_000_000_000u64;
-
-        Difficulty::<Test>::put(new_difficulty);
-
-        let stored_difficulty = Difficulty::<Test>::get();
-        assert_eq!(stored_difficulty, new_difficulty);
-    });
-}
-
-#[test]
-fn test_pow_verification_different_algorithms() {
-    run_test(|| {
-        let header = create_block_header(1, 12345);
-        let easy_difficulty = u64::MAX;
-        let hard_difficulty = 1000u64;
-
-        // Test basic Blake2
-        let result_basic = functions::verify_pow(&header, easy_difficulty);
-        assert!(result_basic);
-
-        // Test enhanced Blake2
-        let result_enhanced = functions::verify_pow_enhanced(&header, easy_difficulty);
-        assert!(result_enhanced);
-
-        // Test SHA-256
-        let result_sha = functions::verify_pow_sha256(&header, easy_difficulty);
-        assert!(result_sha);
-
-        // Test Keccak
-        let result_keccak = functions::verify_pow_keccak(&header, easy_difficulty);
-        assert!(result_keccak);
-
-        // All should fail with very hard difficulty
-        assert!(!functions::verify_pow(&header, hard_difficulty));
-        assert!(!functions::verify_pow_enhanced(&header, hard_difficulty));
-        assert!(!functions::verify_pow_sha256(&header, hard_difficulty));
-        assert!(!functions::verify_pow_keccak(&header, hard_difficulty));
-    });
-}
-
-#[test]
-fn test_slashing_records_storage() {
-    run_test(|| {
-        let validator = 1u64;
-        let reason = SlashingReason::DoubleSigning;
-        let amount = 5_000_000_000_000_000_000u128; // 5 GHOST
-        let block_number = 100u64;
-
-        let mut records = SlashingRecords::<Test>::get();
-        records.push((validator, reason, amount, block_number));
-        SlashingRecords::<Test>::put(records);
-
-        let stored_records = SlashingRecords::<Test>::get();
-        assert_eq!(stored_records.len(), 1);
-        assert_eq!(stored_records[0].0, validator);
-        assert_eq!(stored_records[0].2, amount);
-    });
-}
-
-#[test]
-fn test_double_sign_reports() {
-    run_test(|| {
-        let validator = 1u64;
-
-        DoubleSignReports::<Test>::insert(validator, true);
-
-        let is_reported = DoubleSignReports::<Test>::get(validator);
-        assert!(is_reported);
-    });
-}
-
-#[test]
-fn test_invalid_block_reports() {
-    run_test(|| {
-        let validator = 1u64;
-
-        InvalidBlockReports::<Test>::insert(validator, true);
-
-        let is_reported = InvalidBlockReports::<Test>::get(validator);
-        assert!(is_reported);
+fn migration_is_noop_when_already_v2() {
+    new_test_ext().execute_with(|| {
+        // Fresh storage has no stamped version; simulate an already-migrated
+        // chain by stamping v2 first.
+        StorageVersion::new(2).put::<GhostConsensus>();
+        assert_eq!(GhostConsensus::on_chain_storage_version(), STORAGE_VERSION);
+        crate::Difficulty::<Test>::put(U256::from(9_999u64));
+        MigrateToV2::<Test>::on_runtime_upgrade();
+        assert_eq!(crate::Difficulty::<Test>::get(), U256::from(9_999u64));
     });
 }
