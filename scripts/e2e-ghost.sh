@@ -530,7 +530,7 @@ echo "==> [7/7] Miner/validator rewards minted on-chain"
 # validators, so every block pays them the author (40%) and/or
 # validator-share (60%) reward. Block $RETARGET_ADJUST stays inside the
 # default pruning window, so the historical read always works.
-wait_block_at_least "$ALICE_RPC" $((RETARGET_ADJUST + 30)) "reward window" 300
+wait_block_at_least "$ALICE_RPC" $((RETARGET_ADJUST + 30)) "reward window" "${REWARD_TIMEOUT:-1500}"
 REWARD_BASE_HASH="$(block_hash_by_number "$ALICE_RPC" "$RETARGET_ADJUST")"
 ALICE_BAL_BEFORE="$(account_free_balance "$ALICE_RPC" "$ALICE_ACCT" "$REWARD_BASE_HASH")"
 BOB_BAL_BEFORE="$(account_free_balance "$ALICE_RPC" "$BOB_ACCT" "$REWARD_BASE_HASH")"

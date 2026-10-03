@@ -1,6 +1,6 @@
 # Ghost Blockchain — Implementation Summary
 
-Current state of the tree on `devin/integration` (spec_version 102). This
+Current state of the tree on `devin/integration` (spec_version 103). This
 doc describes what is *built and verified*; the launch-gate checklist with
 what remains open lives in `docs/testnet-readiness.md`, and the per-change
 history is `CHANGELOG.md`.

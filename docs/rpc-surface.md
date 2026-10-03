@@ -41,7 +41,7 @@ the string, never as protocol errors) and do no storage iteration.
 - No method anywhere returns secret material; keystore access is one-way
   (`insertKey` writes, `rotateKeys` generates internally).
 
-## Client compatibility (verified live, spec-102 binary)
+## Client compatibility (verified live, spec-103 binary)
 
 - `rpc_methods` reports 102 methods: the full legacy set PJS Apps /
   subxt need (`system_*`, `chain_*`, `state_*`, `author_*`, `payment_*`)

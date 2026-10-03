@@ -71,7 +71,9 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
     //   the compatible custom types.
     // 102: pallet-template removed from the runtime; pallet-ghost-pqc
     // composed at index 14.
-    spec_version: 102,
+    // 103: MigrateToV2 wired via Hooks::on_runtime_upgrade, ghost-pqc
+    // storage_version(1) stamped, system_properties in chainspecs.
+    spec_version: 103,
     impl_version: 1,
     apis: apis::RUNTIME_API_VERSIONS,
     transaction_version: 1,

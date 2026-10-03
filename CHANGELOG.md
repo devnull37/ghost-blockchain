@@ -4,7 +4,28 @@ All notable changes to the Ghost chain are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). `spec_version`
 tracks the runtime; node versions tag independently.
 
-## Unreleased — spec_version 102
+## Unreleased — spec_version 103
+
+### Runtime (103)
+- `MigrateToV2` wired via `Hooks::on_runtime_upgrade` (was tested but
+  unreachable — a real upgrade would have skipped it).
+- `pallet-ghost-pqc` stamps `StorageVersion` 1 for future migration gating.
+- `pqc_attest` weight +1 read for the bonded-validator gate (regen pending).
+- Chainspecs set `system_properties` (ss58Format/tokenDecimals/tokenSymbol).
+- Migration/convention: upgrade wiring verified — `e2e-upgrade.sh` drill.
+
+### Gates & tooling (103)
+- `e2e-upgrade.sh`: Wasm→Wasm `sudo set_code` drill on a live dev chain.
+- `e2e-forged-seal.sh`: forged-seal rejection gate (patched malicious binary).
+- `genesis-generate.sh` + `ghost-testnet-params.example.json`: ceremony
+  launcher producing plain+raw specs with checksums.
+- `release.yml`: tagged release pipeline (binary + SHA256 + specs + notes).
+- `e2e-ghost.sh` reward-window wait now scales (`REWARD_TIMEOUT`, was a
+  fixed 300s that false-failed on a slow box).
+- `lib-ghost-rpc.sh` `map_key` fixed to Blake2_128Concat (Bonded reads
+  silently targeted a nonexistent key — verified live).
+
+## Historical — spec_version 102
 
 ### Consensus engine (replaced Aura with real Ghost PoW)
 - `ghost-consensus` crate: `GhostPowAlgorithm` (work-factor PoW), `HeaviestChain` fork choice, deterministic tie-break on seal `pre_hash`, mining grind helpers, `PowAux` persistence.

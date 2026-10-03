@@ -5,7 +5,7 @@ failure modes that matter for a PoW + committee chain: loss of all mining,
 loss of committee members, and a same-authority equivocation.
 
 Each scenario lists the *expected* behavior from the design docs, then what
-was *observed* on this box (spec_version 102 binary).
+was *observed* on this box (spec_version 103 binary).
 
 ## Scenario A — all miners halt
 

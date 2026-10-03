@@ -47,7 +47,7 @@ Release bar: the standard a top-tier organization would apply before shipping a 
 - [ ] Storage migration framework convention (versioned storage, `OnRuntimeUpgrade` hooks) + a tested no-op migration
 - [ ] Genesis ceremony doc for public testnet: docs/genesis-ceremony.md + `chainspecs/local.json` published; the `testnet` preset + real allocation table still must be created
 - [x] SS58 prefix decision documented (docs/genesis-ceremony.md — default 42 acceptable for testnet, registration required before mainnet)
-- [ ] Remove `pallet-template` and `sudo` from production preset: pallet-template fully removed from the runtime (crate deleted, spec_version 102). sudo removal is a chainspec-preset decision — tracked under the genesis ceremony item
+- [ ] Remove `pallet-template` and `sudo` from production preset: pallet-template fully removed from the runtime (crate deleted, spec_version 103). sudo removal is a chainspec-preset decision — tracked under the genesis ceremony item
 
 ### Ops maturity
 - [x] Telemetry/metrics documented (docs/node-ops.md — alert table, best-vs-finalized diagnostics; honest note: no dedicated hashrate metric yet)
