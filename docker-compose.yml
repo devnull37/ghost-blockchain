@@ -8,8 +8,9 @@
 # P2P:      alice :30333                  bob :31333
 # Prom:     alice :9615                   bob :19615
 #
-# `--rpc-external`/`--prometheus-external` are dev-only conveniences so the
-# published host ports work; do not carry them into public deployments.
+# `--unsafe-rpc-external`/`--prometheus-external` are dev-only conveniences so
+# the published host ports work (validators refuse plain `--rpc-external`);
+# do not carry them into public deployments.
 
 name: ghost-devnet
 
@@ -45,7 +46,7 @@ services:
       - "30333"
       - --rpc-port
       - "9933"
-      - --rpc-external
+      - --unsafe-rpc-external
       - --rpc-cors
       - all
       - --prometheus-port
@@ -83,7 +84,7 @@ services:
       - "30333"
       - --rpc-port
       - "9933"
-      - --rpc-external
+      - --unsafe-rpc-external
       - --rpc-cors
       - all
       - --prometheus-port
