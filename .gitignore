@@ -3,3 +3,6 @@
 *.pdb
 .DS_Store
 /tmp
+
+# soak harness output
+/soak-data/
