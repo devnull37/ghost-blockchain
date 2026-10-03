@@ -18,7 +18,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 source "$HERE/lib-ghost-rpc.sh"
 
-BASE="$(mktemp -d /tmp/ghost-upgrade-XXXX)"
+BASE="$(mktemp -d "${TMPDIR:-/tmp}/ghost-upgrade-XXXX")"
 PORT=29970
 RPCPORT=29971
 PROMPORT=31461

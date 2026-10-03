@@ -102,7 +102,7 @@ RETARGET_TIMEOUT="${RETARGET_TIMEOUT:-1200}"
 
 declare -A LIVE_PIDS=()
 LAST_PID=""
-TMP_DIR="$(mktemp -d /tmp/ghost-e2e-ghost.XXXXXX)"
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ghost-e2e-ghost.XXXXXX")"
 # ghost_scale writes its python helper here on first use; cleaned up below.
 GHOST_E2E_HELPER_DIR="$TMP_DIR"
 

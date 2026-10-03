@@ -23,7 +23,7 @@ BOB_NODE_KEY=0000000000000000000000000000000000000000000000000000000000000002
 ALICE_PEER=12D3KooWEyoppNCUx8Yx66oV9fJnriXwCcXwDDUA2kj6vnc6iDEp
 
 PIDS=()
-TMP_DIR="$(mktemp -d /tmp/ghost-e2e.XXXXXX)"
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ghost-e2e.XXXXXX")"
 
 cleanup() {
 	for pid in "${PIDS[@]:-}"; do

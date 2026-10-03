@@ -42,7 +42,7 @@ A_PEER=12D3KooWEyoppNCUx8Yx66oV9fJnriXwCcXwDDUA2kj6vnc6iDEp
 
 declare -A LIVE_PIDS=()
 LAST_PID=""
-TMP_DIR="$(mktemp -d /tmp/ghost-forged.XXXXXX)"
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ghost-forged.XXXXXX")"
 GHOST_E2E_HELPER_DIR="$TMP_DIR"
 trap 'kill $(printf "%s " "${!LIVE_PIDS[@]}") 2>/dev/null; sleep 1; kill -9 $(printf "%s " "${!LIVE_PIDS[@]}") 2>/dev/null; rm -rf "$TMP_DIR"' EXIT
 

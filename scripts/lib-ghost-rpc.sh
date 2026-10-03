@@ -39,7 +39,7 @@ GHOST_SCALE_PY_FILE=""
 ghost_scale() {
 	if [ -z "$GHOST_SCALE_PY_FILE" ]; then
 		local dir="${GHOST_E2E_HELPER_DIR:-}"
-		[ -n "$dir" ] || dir="$(mktemp -d /tmp/ghost-scale.XXXXXX)"
+		[ -n "$dir" ] || dir="$(mktemp -d "${TMPDIR:-/tmp}/ghost-scale.XXXXXX")"
 		GHOST_SCALE_PY_FILE="$dir/ghost_scale.py"
 		cat >"$GHOST_SCALE_PY_FILE" <<'PYEOF'
 import hashlib
