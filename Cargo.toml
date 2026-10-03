@@ -50,6 +50,10 @@ pallet-sudo = { git = "https://github.com/paritytech/polkadot-sdk.git", branch =
 pallet-transaction-payment = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407", default-features = false }
 pallet-aura = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407", default-features = false }
 pallet-grandpa = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407", default-features = false }
+pallet-session = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407", default-features = false }
+pallet-offences = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407", default-features = false }
+pallet-im-online = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407", default-features = false }
+pallet-authorship = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407", default-features = false }
 
 # Substrate primitives
 sp-core = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407", default-features = false }
@@ -87,6 +91,7 @@ sc-chain-spec = { git = "https://github.com/paritytech/polkadot-sdk.git", branch
 sc-rpc = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407" }
 sc-rpc-api = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407" }
 sc-consensus = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407" }
+sc-consensus-pow = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407" }
 sc-offchain = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407" }
 
 sp-consensus = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407" }
@@ -101,6 +106,12 @@ sp-timestamp = { git = "https://github.com/paritytech/polkadot-sdk.git", branch 
 
 codec = { package = "parity-scale-codec", version = "3.7.5", default-features = false, features = ["derive"] }
 scale-info = { version = "2.11.6", default-features = false, features = ["derive"] }
+
+# PQC: pure-Rust Dilithium5 verifier, no_std-capable (for runtime/Wasm use).
+pqc_dilithium = { version = "0.5", default-features = false }
+
+# Property-based testing (dev-dependency only).
+proptest = { version = "1.5", default-features = false, features = ["std", "alloc"] }
 
 # Local dependencies
 pallet-template = { path = "pallets/template", default-features = false }
