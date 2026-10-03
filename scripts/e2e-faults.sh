@@ -27,6 +27,9 @@ export GHOST_E2E_HELPER_DIR="${GHOST_E2E_HELPER_DIR:-}"
 . "$(dirname "${BASH_SOURCE[0]}")/lib-ghost-rpc.sh"
 
 MINING_THREADS="${MINING_THREADS:-2}"
+# Per-node memory caps so up to 4 concurrent nodes fit on small boxes.
+# Override via GHOST_NODE_MEM_ARGS.
+NODE_MEM_ARGS="${GHOST_NODE_MEM_ARGS:---db-cache 64 --max-runtime-instances 2 --runtime-cache-size 1}"
 
 ALICE_ACCT=d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d
 ALICE_SS58=5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY
@@ -86,7 +89,8 @@ start_node() {
 		esac
 		prev="$arg"
 	done
-	"$BIN" "$@" --no-telemetry -l warn >"$log" 2>&1 &
+	# shellcheck disable=SC2086 # NODE_MEM_ARGS is intentionally word-split
+	"$BIN" "$@" $NODE_MEM_ARGS --no-telemetry -l warn >"$log" 2>&1 &
 	LAST_PID=$!
 	LIVE_PIDS[$LAST_PID]=1
 }
