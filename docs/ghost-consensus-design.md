@@ -25,25 +25,27 @@ The PoW `ConsensusEngineId` is `POW_ENGINE_ID` (`b"pow_"`) from `sp_consensus_po
 
 Crate: `node/` sibling crate `consensus/` implementing `PowAlgorithm<Block>`.
 
-- `Difficulty = sp_core::U256` (already implements `TotalDifficulty`).
+- `Difficulty = sp_core::U256` (already implements `TotalDifficulty` via saturating add).
+- **Difficulty is a work factor, not a target** (kulupu convention): larger = harder. `PowBlockImport` sums per-block difficulty into `total_difficulty` and picks the heaviest chain, so difficulty MUST be monotone in work — a target-style value (where easier = larger) would invert fork choice.
 - `verify(parent, pre_hash, pre_digest, seal, difficulty)`:
   - `input = pre_hash.as_ref() ++ pre_digest ++ seal.encode()`
   - `hash = blake2_256(blake2_256(input))` (double-hash; deterministic, Wasm-safe)
-  - `value = U256::from_little_endian(hash)`; valid iff `value <= difficulty`.
+  - `value = U256::from_big_endian(hash)`; valid iff `value.saturating_mul(difficulty) <= U256::MAX` (equivalent to `value <= MAX / difficulty`; overflow saturates to MAX and fails). `difficulty == 0` always fails.
+  - `pre_digest` is the raw `PreRuntime(POW_ENGINE_ID, bytes)` payload = `SCALE(AccountId32)` miner id — decode it and bind it into the verification (a block with a malformed author digest is rejected client-side; rewards decode the same digest).
   - `preliminary_verify` returns `Ok(None)` (needs parent aux context — keep full verify).
-  - `break_tie`: keep default (earliest-seen wins).
-- `difficulty(parent)`: calls the runtime API `GhostPowApi::next_difficulty(parent_hash)`; on cold start before runtime availability, falls back to genesis `INITIAL_DIFFICULTY` from chain spec extension / constant.
+  - `break_tie`: keep default `false` (earliest-seen wins).
+- `difficulty(parent)`: calls the runtime API `GhostPowApi::next_difficulty(parent_hash)`; called twice per import — implement a small memoization; on failure fall back to `PowAux` parent's difficulty.
 
 ## 4. Difficulty adjustment (runtime-side, deterministic)
 
 All nodes compute difficulty identically from on-chain state — `sc-consensus-pow` calls `difficulty(parent)` during import on every node, so it must be a pure function of the parent state.
 
-- `pallet-ghost-consensus` storage: `Difficulty: U256` (stored as `[u8; 32]` LE for portability), `LastRetargetTime: Moment`, `RetargetsDone: u32`.
-- `RETARGET_INTERVAL = 100` blocks, `TARGET_BLOCK_TIME_MS = 5000`, clamp `actual/expected` to `[1/4, 4]` per retarget.
+- `pallet-ghost-consensus` storage: `Difficulty: U256` (**work factor** — SCALE encodes U256 as 32-byte LE), `LastRetargetTime: Moment`, `RetargetsDone: u32`.
+- `RETARGET_INTERVAL = 100` blocks, `TARGET_BLOCK_TIME_MS = 5000`, clamp factor to `[1/4, 4]` per retarget.
 - In `on_initialize`, when `block_number % RETARGET_INTERVAL == 0` and `RetargetsDone > 0` (skip genesis window):
-  `new_target = old_target * clamp(elapsed / (INTERVAL * 5000ms), 0.25, 4)`, floored at `MIN_TARGET = 1`, capped at `MAX_TARGET` (from genesis).
+  `new_difficulty = old_difficulty * clamp(expected_ms / elapsed_ms, 0.25, 4)` — blocks arriving too fast (elapsed < expected) INCREASE the work factor; too slow decreases it. Floored at `MIN_DIFFICULTY` (genesis constant, ≥ 1), saturated at U256::MAX. Use `expected_ms = RETARGET_INTERVAL * TARGET_BLOCK_TIME_MS` between the timestamps of the first and last block of the interval, guarded against `elapsed_ms == 0` (treat as max-up retarget).
 - Genesis difficulty chosen so a dev machine mines in ~1-5s: `INITIAL_DIFFICULTY` constant in runtime config, overridable via chain spec `ghostConsensus.difficulty` genesis field.
-- Runtime API `GhostPowApi`: `next_difficulty() -> [u8; 32]` (LE U256) and `author_of(digest) -> Option<AccountId>` helper is NOT an api — attribution is pure digest decoding (see §5).
+- Runtime API `GhostPowApi`: `next_difficulty() -> U256` (SCALE U256 = 32-byte LE on the wire). `author_of` is NOT an api — attribution is pure digest decoding (see §5).
 
 ## 5. Miner attribution & rewards (unspoofable)
 
@@ -82,7 +84,7 @@ All nodes compute difficulty identically from on-chain state — `sc-consensus-p
 ## 9. Node service wiring (`node/src/service.rs`)
 
 - Import queue: `sc_consensus_pow::import_queue(PowBlockImport { algorithm: GhostPowAlgorithm, inner: grandpa_block_import, ... })` — PoW seal verification → GRANDPA justification handling → import.
-- `select_chain = sc_consensus::LongestChain` (PowBlockImport internally picks heaviest via total difficulty).
+- `select_chain`: a `HeaviestChain`-style `SelectChain` implementation (in `consensus/`) that picks the leaf with max `PowAux.total_difficulty`, tie-break higher block number, then lower hash. `sc_consensus::LongestChain` is WRONG here — it selects by number, while `PowBlockImport` decides the client's best by `ForkChoiceStrategy::Custom(total_difficulty)`. The same `select_chain` feeds GRANDPA's voter so finality tracks the heaviest chain.
 - Mining: when `--validator`/`--miner` flag (new `RunCmd` flag `--mine` + `--mining-threads N` + `--miner-coinbase <SS58>`), spawn `start_mining_worker` + N grind threads reading `MiningHandle::metadata()` → `submit()`. `--dev` mines by default with Alice as coinbase.
 - RPC: `ghost_getConsensusMode` reports real status from client (engine name, difficulty, peers); `ghost_getPqcStatus` reports registry state via runtime API.
 - `ghost mine` CLI becomes a standalone CPU miner talking to a node's RPC (get metadata → submit seal) OR an in-node thread — choose in-node for v1, CLI command drives the same path via `--mine` on run.
