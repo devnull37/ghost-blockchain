@@ -58,13 +58,22 @@ if [ -n "${GHOST_EVIL_NODE_BIN:-}" ]; then
 	EVIL_BIN="$GHOST_EVIL_NODE_BIN"
 else
 	EVIL_BIN="$TMP_DIR/ghost-node-evil"
+	# Stash the honest binary FIRST: the evil build overwrites
+	# $TARGET_DIR/debug/ghost-node on disk, and the "honest" nodes start
+	# from that path — without this stash they'd run the evil binary too.
+	HONEST_BIN="$TMP_DIR/ghost-node-honest"
+	cp "$BIN" "$HONEST_BIN"
+	BIN="$HONEST_BIN"
 	echo "applying scripts/forged-seal.patch"
 	( cd "$ROOT_DIR" && patch -f -p1 < scripts/forged-seal.patch )
 	trap 'kill $(printf "%s " "${!LIVE_PIDS[@]}") 2>/dev/null; sleep 1; kill -9 $(printf "%s " "${!LIVE_PIDS[@]}") 2>/dev/null; ( cd "'"$ROOT_DIR"'" && patch -f -R -p1 < scripts/forged-seal.patch ); rm -rf "$TMP_DIR"' EXIT
 	( cd "$ROOT_DIR" && cargo build --bin ghost-node )
 	cp "$TARGET_DIR/debug/ghost-node" "$EVIL_BIN"
 	( cd "$ROOT_DIR" && patch -f -R -p1 < scripts/forged-seal.patch )
-	echo "evil binary built at $EVIL_BIN (tree restored)"
+	# Rebuild the honest binary so the tree's binary matches the tree again
+	# (the file on disk is currently the evil build).
+	( cd "$ROOT_DIR" && cargo build --bin ghost-node )
+	echo "evil binary built at $EVIL_BIN (tree + honest binary restored)"
 fi
 "$EVIL_BIN" --version
 
