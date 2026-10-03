@@ -96,8 +96,9 @@ TARGET_BLOCK_TIME_MS=5000
 MIN_DIFFICULTY=1000000
 RETARGET_BLOCK=205
 # ~4.5s/blk debug pace => ~15 min to the boundary; bound generously since a
-# timeout this late in the gate wastes the entire run.
-RETARGET_TIMEOUT=1200
+# timeout this late in the gate wastes the entire run. Overridable for
+# slower/shared hardware.
+RETARGET_TIMEOUT="${RETARGET_TIMEOUT:-1200}"
 
 declare -A LIVE_PIDS=()
 LAST_PID=""
