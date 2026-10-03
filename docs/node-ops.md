@@ -35,6 +35,10 @@ incidents. Role-specific runbooks (session keys, PQC, slashing) are in
 | `substrate_sub_libp2p_peers_count` ≥ 1 | partitioned node |
 | `substrate_sub_libp2p_is_major_syncing` = 0 | sync wedged |
 
+Note: there is no dedicated mining-hashrate metric today — proxy it from
+`best`-block production rate vs `next_difficulty`
+(`ghost_getConsensusMode`); a hashrate metric is a tracked gap.
+
 The decisive pair is `best` vs `finalized` divergence: `best` advancing
 with `finalized` pinned = committee liveness failure (see
 `docs/economic-parameters.md` "Liveness failure semantics");
