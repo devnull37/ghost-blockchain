@@ -17,10 +17,10 @@ repository = "https://github.com/devnull37/ghost-blockchain"
 unsafe_code = "forbid"
 
 [workspace.lints.clippy]
-absolute-paths-not-starting-with-crate = "warn"
-redundant-lifetimes = "warn"
-explicit-outlives-requirements = "warn"
-let-underscore = "allow"
+absolute_paths_not_starting_with_crate = "warn"
+redundant_lifetimes = "warn"
+explicit_outlives_requirements = "warn"
+let_underscore = "allow"
 
 [workspace.dependencies]
 # Pin all dependencies to polkadot-sdk version/branch

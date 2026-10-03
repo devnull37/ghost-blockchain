@@ -28,7 +28,7 @@ impl SubstrateCli for Cli {
     }
 
     fn support_url() -> String {
-        "https://github.com/CoolCreator247/ghost-blockchain".into()
+        "https://github.com/devnull37/ghost-blockchain".into()
     }
 
     fn copyright_start_year() -> i32 {
