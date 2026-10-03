@@ -187,31 +187,42 @@ wait_block_at_least "$A1_RPC" 6 "alice" 240
 wait_finalized_at_least "$A1_RPC" 3 "alice" 240
 echo "baseline: best=$(best_number "$A1_RPC") finalized=$(finalized_number "$A1_RPC")"
 
-# Halt the ONLY miner. PoW best head freezes; finality must catch up to the
-# frozen head and stop — never advance past it (nothing new to finalize).
+# Halt the ONLY miner. PoW best head freezes.
+#
+# Liveness contract under GRANDPA's default voting rules
+# (VotingRulesBuilder::default() = BeforeBestBlockBy(2) +
+# ThreeQuartersOfTheUnfinalizedChain): voters restrict their prevotes to
+# best-2, so finality's reachable equilibrium while best is frozen is
+# fin = best - 2 — never best itself, and it advances only as new blocks
+# extend best. Assert exactly that: fin converges to best-2, never
+# overshoots it, and resumes lag-2 tracking once mining resumes.
 # First ensure bob's import view has caught up with alice's head — freezing
 # while bob is mid-sync makes the catch-up measurement meaningless.
 wait_block_at_least "$BOB_RPC" "$(best_number "$A1_RPC")" "bob view" 120
 kill_node "$M1_PID"
 sleep 3
 frozen_best="$(best_number "$A1_RPC")"
+equil=$((frozen_best - 2))
+[ "$equil" -lt 0 ] && equil=0
 
 fin=0
 for _ in $(seq 1 300); do
 	fin="$(finalized_number "$A1_RPC")"
-	[ "$fin" -ge "$frozen_best" ] && break
+	[ "$fin" -ge "$equil" ] && break
 	sleep 1
 done
-if [ "$fin" -lt "$frozen_best" ]; then
-	echo "finality never caught up to frozen best: fin=$fin best=$frozen_best" >&2
+if [ "$fin" -lt "$equil" ]; then
+	echo "finality never reached the voting-rule equilibrium: fin=$fin best=$frozen_best (want >= best-2=$equil)" >&2
 	diag_log "$TMP_DIR/a-alice.log" 40
 	diag_log "$TMP_DIR/a-bob.log" 40
 	diag_log "$TMP_DIR/a-miner1.log" 20
 	exit 1
 fi
-echo "finality caught up to frozen best ($fin/$frozen_best)"
+echo "finality reached the frozen-best equilibrium ($fin = best-$((frozen_best - fin)) lag)"
 
-# Now prove it stays put: 15s with best frozen, finalized must not exceed it.
+# Now prove it stays put: 15s with best frozen, finalized must not exceed
+# the equilibrium — a vote landing past best-2 would mean the voting-rule
+# bound is broken upstream of us.
 sleep 15
 b2="$(best_number "$A1_RPC")"
 f2="$(finalized_number "$A1_RPC")"
@@ -219,11 +230,11 @@ if [ "$b2" -gt "$frozen_best" ]; then
 	echo "best advanced with no miner running: $frozen_best -> $b2" >&2
 	exit 1
 fi
-if [ "$f2" -gt "$b2" ]; then
-	echo "finality overshot the best head: fin=$f2 > best=$b2" >&2
+if [ "$f2" -gt "$equil" ]; then
+	echo "finality overshot the best-2 equilibrium while frozen: fin=$f2 > $equil" >&2
 	exit 1
 fi
-echo "stall is clean: best frozen at $b2, finalized=$f2 (no overshoot)"
+echo "stall is clean: best frozen at $b2, finalized=$f2 (equilibrium held)"
 
 # Miner returns -> both resume.
 start_node "$TMP_DIR/a-miner1b.log" \
@@ -236,7 +247,9 @@ start_node "$TMP_DIR/a-miner1b.log" \
 M1_PID=$LAST_PID
 wait_rpc "$M1_RPC"
 wait_block_at_least "$A1_RPC" $((b2 + 3)) "alice" 240
-wait_finalized_at_least "$A1_RPC" $((b2 + 2)) "alice" 240
+# With best at >= b2+3 the equilibrium floor is b2+1 — proving finality
+# resumed its lag-2 tracking is enough.
+wait_finalized_at_least "$A1_RPC" $((b2 + 1)) "alice" 240
 echo "A PASS: mining halted -> clean stall at best; resumed -> finalized followed"
 
 kill_node "$M1_PID"; kill_node "$BOB_PID"; kill_node "$ALICE_PID"
