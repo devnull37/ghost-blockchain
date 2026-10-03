@@ -452,13 +452,13 @@ fn reward_rounding_remainder_goes_to_author() {
 
         let before: Balance = [ALICE, BOB, CHARLIE, DAVE]
             .iter()
-            .map(|a| Balances::free_balance(a))
+            .map(Balances::free_balance)
             .sum();
         set_author(DAVE);
         <GhostConsensus as Hooks<u64>>::on_finalize(System::block_number());
         let after: Balance = [ALICE, BOB, CHARLIE, DAVE]
             .iter()
-            .map(|a| Balances::free_balance(a))
+            .map(Balances::free_balance)
             .sum();
         // No dust lost: total minted == BlockReward, all to accounts.
         assert_eq!(after - before, BLOCK_REWARD);
