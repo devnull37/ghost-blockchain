@@ -1,86 +1,72 @@
 # Ghost Blockchain
 
-Ghost is a Substrate-based blockchain under active development. The current branch contains a Ghost consensus pallet, CLI helpers, and native build/test support, but it is not yet a live hybrid PoW/PoS testnet.
+Ghost is a Substrate-based PoW + PoS-committee chain: miners produce blocks
+via real proof-of-work (`sc-consensus-pow`, work-factor difficulty), and a
+stake-selected committee finalizes them via GRANDPA. Validator seats require
+bonded stake **and** a registered ML-DSA-87 (FIPS-204) key.
 
-## Current State
+## Consensus
 
-- The node service still uses Aura for block authoring and GRANDPA for finality.
-- The `pallet-ghost-consensus` code path contains Ghost PoW/PoS/PQC logic, but it is not yet the block production engine.
-- Native pallet/runtime tests and a full embedded-Wasm node build are available with the documented Substrate toolchain.
-- A local Aura/GRANDPA two-validator smoke test passes via `scripts/e2e-local.sh`.
-- Dilithium5 verification is present for native/std paths, but the runtime no_std/Wasm PQC path is not yet a completed testnet-ready feature.
-
-## What Works Now
-
-- `pallet-ghost-consensus` unit tests.
-- Embedded-Wasm node builds.
-- Single-node dev authoring.
-- Two-node local authoring and GRANDPA finality on the Aura/GRANDPA path.
-- Ghost CLI helpers such as `ghost status`, `ghost mine`, `ghost stake`, and `ghost balance` in native mode.
-- Development account setup for Alice and Bob in the chain spec.
-
-## What Is Still Pending
-
-- Wiring Ghost consensus into live block authoring and finality.
-- Reliable reward attribution and distribution through the live block path.
-- Multi-node E2E testing on the actual Ghost consensus path.
-- Runtime PQC verification that works in no_std/Wasm.
+- **PoW authoring**: `--mine` + `--miner-coinbase` — no stake or keys
+  required. Seal = `DigestItem::Seal(b"pow_", GhostSeal{nonce, pre_hash})`;
+  the miner's `AccountId32` rides in a seal-bound `PreRuntime` digest, so
+  rewards can't be claimed by extrinsic.
+- **Fork choice**: heaviest chain by cumulative difficulty, deterministic
+  tie-break on embedded `pre_hash`.
+- **Finality**: GRANDPA over the PoW chain, voted by a `pallet_session`
+  committee selected each session from top bonded candidates.
+- **Difficulty**: on-chain retarget every 100 blocks,
+  `new = old * clamp(expected/elapsed, 1/4, 4)`, floored at `MinDifficulty`
+  — computed identically in node and pallet via `ghost_pow_primitives`.
+- **Rewards**: 10 GHOST/block — 40% to the digest-decoded author, 60%
+  pro-rata over the seated committee.
+- **Slashing**: GRANDPA equivocation (auto-reported by offchain workers)
+  and im-online unresponsiveness slash bond + unbonding chunks, then chill.
+- **PQC**: `pallet-ghost-pqc` registry in the runtime (index 14);
+  `validate()` and `pqc_attest` both gate on it.
 
 ## Build
 
-Use the local smoke test first:
-
 ```bash
-rtk scripts/e2e-local.sh
-```
-
-For a manual full build:
-
-```bash
-rtk env \
-  WASM_BUILD_WORKSPACE_HINT=$PWD \
-  LIBCLANG_PATH=/lib/llvm-18/lib \
-  BINDGEN_EXTRA_CLANG_ARGS="-I/usr/lib/gcc/x86_64-linux-gnu/13/include -I/usr/include/x86_64-linux-gnu -I/usr/include" \
-  cargo build --bin ghost-node
-```
-
-Run the pallet tests:
-
-```bash
-rtk cargo test -p pallet-ghost-consensus
-```
-
-For a release build:
-
-```bash
-rtk cargo build --release --bin ghost-node
+# Toolchain is pinned by rust-toolchain.toml (rustc 1.88.0 + wasm32).
+# Needs clang/libclang + system deps — see docs/rust-setup.md.
+cargo build --release --bin ghost-node
 ```
 
 ## Run
 
-The native binary can be used for local inspection:
-
 ```bash
-./target/debug/ghost-node ghost status --detailed
-./target/debug/ghost-node ghost mine --threads 1 --difficulty 18446744073709551615
+# Single dev miner (Alice committee, disposable state):
+ghost-node --dev --tmp --mine --miner-coinbase 5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY
+
+# Two-node local committee + miners:
+ghost-node --chain local --alice --validator --mine --miner-coinbase <ALICE SS58>
+ghost-node --chain local --bob --validator --mine --miner-coinbase <BOB SS58> --bootnodes <A>
 ```
 
-Run the repeatable local E2E smoke test with:
+See `docs/operator-guide.md` (validators + miners) and
+`docs/node-ops.md` (sizing, metrics, incidents).
 
-```bash
-rtk scripts/e2e-local.sh
-```
+## Verification gates
 
-## Testnet Readiness
+| Gate | What it proves |
+|---|---|
+| `cargo test --workspace` | pallet + consensus unit/property tests |
+| `rtk scripts/e2e-ghost.sh` | 2-miner live PoW: seals, finality, retarget, rewards, restart |
+| `rtk scripts/e2e-faults.sh` | miner halt / committee offline / equivocation→slash |
+| `rtk scripts/e2e-forged-seal.sh` | honest nodes reject invalid PoW from a forger |
+| `rtk scripts/soak-ghost.sh` | multi-node 40-min soak, restarts, fork agreement |
+| CI | fmt, clippy, test, wasm-build, build, e2e, e2e-faults, audit, deny; weekly soak |
 
-See [docs/testnet-readiness.md](docs/testnet-readiness.md) for the checklist and runbook that gate testnet launch.
+## Docs
 
-## Architecture Snapshot
+`docs/` contains the protocol spec, threat model, design doc,
+economic parameters, operator guide, node-ops, genesis ceremony, faucet
+plan, RPC audit, upgrade policy, readiness checklist, soak + adversarial
+reports, and both security reviews. `CHANGELOG.md` tracks spec_version.
 
-- `node/`: client, CLI, RPC, chain spec, and service wiring.
-- `runtime/`: FRAME runtime composition.
-- `pallets/pallet-ghost-consensus/`: Ghost consensus logic, reward rules, slashing, and staking primitives.
+## Status
 
-## Background
-
-Ghost targets 5-second blocks, a 10 GHOST block reward, a 40/60 miner-to-staker split, and a minimum stake of 1 GHOST. Those are the intended economics and protocol goals; the docs in this repository now call out where the current implementation has reached the live path and where it still has work left.
+Working toward public testnet: the gate list lives in
+`docs/testnet-readiness.md` (what is proven vs what is still open).
+Current `spec_version`: 102.

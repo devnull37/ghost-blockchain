@@ -4,39 +4,52 @@ This repository uses `rtk` as the command wrapper for local shell work. Prefer:
 
 ```bash
 rtk cargo test -p pallet-ghost-consensus
-rtk scripts/e2e-local.sh
+rtk scripts/e2e-ghost.sh
 rtk env \
   WASM_BUILD_WORKSPACE_HINT=$PWD \
-  LIBCLANG_PATH=/lib/llvm-18/lib \
+  LIBCLANG_PATH=/usr/lib/llvm-14/lib \
   BINDGEN_EXTRA_CLANG_ARGS="-I/usr/lib/gcc/x86_64-linux-gnu/13/include -I/usr/include/x86_64-linux-gnu -I/usr/include" \
   cargo build --bin ghost-node
 ```
 
 Current build reality:
-- Full embedded-Wasm node builds pass with the documented Substrate C toolchain environment.
-- `scripts/e2e-local.sh` is the repeatable local smoke gate. It builds the node, checks Ghost CLI, boots a dev node, boots Alice/Bob local validators, verifies peering, authoring, GRANDPA finality, and verifies Bob can restart/rejoin/finalize.
-- `clang`/LLVM must be installed locally. On this Ubuntu environment, `LIBCLANG_PATH=/lib/llvm-18/lib` and the include paths in the example above are known-good.
-- `SKIP_WASM_BUILD=1` is still useful for quick native checks, but do not use it to claim node/E2E readiness.
+- Full embedded-Wasm node builds pass with the toolchain pinned in
+  `rust-toolchain.toml` (rustc 1.88.0 + wasm32 target) plus clang/libclang.
+- On this Ubuntu environment `LIBCLANG_PATH=/usr/lib/llvm-14/lib` and the
+  include paths in the example above are known-good; `rtk` exports them.
+- `SKIP_WASM_BUILD=1` is still useful for quick native checks, but do not
+  use it to claim node/E2E readiness.
 
 Consensus reality:
-- `node/src/service.rs` still authors blocks with Aura and finalizes with GRANDPA.
-- `pallets/pallet-ghost-consensus` contains Ghost PoW/PoS/PQC pallet logic, but it is not yet the node's live block production engine.
-- Do not describe the chain as production hybrid PoW/PoS until the service imports, validates, and authors blocks through the Ghost consensus path.
-- The Aura/GRANDPA local chain can peer, author, finalize, and survive a validator restart.
-- Ghost pallet miner tracking, staking escrow, reward-path tests, and PQC-size fixes exist, but they are still pallet/runtime logic rather than the node's consensus engine.
-- Dilithium5 verification is present for native/std builds. Runtime Wasm/no_std PQC verification is intentionally disabled with `PqcRequired = false` until a deterministic no_std verifier is implemented and benchmarked.
+- `node/src/service.rs` produces blocks through `sc-consensus-pow`
+  (`--mine` + `--miner-coinbase`) and finalizes them with GRANDPA voted by
+  a `pallet_session` committee selected from `pallet-ghost-consensus`
+  stake. Aura is fully removed — do not reference it as the live path.
+- `pallets/pallet-ghost-consensus` is the chain's real economic layer:
+  bonded stake, committee selection, difficulty retarget, digest-decoded
+  40/60 rewards, slashing. `pallets/pallet-ghost-pqc` (index 14) gates
+  `validate()` on a registered ML-DSA-87 key.
+- Miner attribution comes from the `PreRuntime(b"pow_", AccountId32)`
+  digest — never from extrinsics.
+- `scripts/e2e-local.sh` is retired; the local gates are `e2e-ghost.sh`
+  (two-miner smoke), `e2e-faults.sh` (adversarial), `e2e-forged-seal.sh`
+  (invalid-PoW rejection), and `soak-ghost.sh` (multi-node soak).
 
-Next todos:
-- Design the real Ghost consensus engine before coding broad changes. Document block authoring, import verification, fork choice, PoW seal format, PoS validator-selection timing, finality interaction, equivocation handling, and reward attribution.
-- Replace or extend the Aura authoring path only after the Ghost import queue can reject invalid PoW/PoS blocks deterministically across nodes.
-- Move miner attribution from pallet-only bookkeeping into the live block authoring/import path so rewards cannot be spoofed by extrinsics.
-- Add on-chain reward accounting tests that cover miner rewards, staker rewards, slashing, failed validation, and replay/double-submit attempts.
-- Implement Dilithium5 runtime verification with a no_std/Wasm-safe verifier. Add proof-of-possession to `register_pqc_key`, benchmark weights, and test valid/invalid signatures through runtime APIs.
-- Add restart and persistence coverage for staking state, block-producer history, reward distribution, and slashing records.
-- Keep `scripts/e2e-local.sh` green after every consensus or runtime change; extend it with Ghost-consensus-specific checks once the live engine exists.
-- Before any public testnet claim, run a multi-node long soak with clean base paths, validator restarts, RPC checks, and finalized-head agreement.
+Next todos (see `docs/production-plan.md` + `docs/testnet-readiness.md`):
+- Full ≥30-min soak and first `e2e-faults.sh`/`e2e-forged-seal.sh` passes
+  on the final tree.
+- `testnet` chainspec preset with a real genesis allocation
+  (`docs/genesis-ceremony.md`).
+- Runtime-upgrade drill (Wasm→Wasm `set_code`) and a tested no-op
+  migration (`docs/runtime-upgrade-policy.md`).
+- Regenerate benchmarked weights via `benchmark pallet` whenever
+  dispatchable logic changes after a benchmark run.
+- Keep every gate green after each consensus or runtime change.
 
 Docs ownership:
-- Keep `README.md`, `IMPLEMENTATION_SUMMARY.md`, and `docs/*` aligned with the current branch state.
-- Put launch-readiness notes in `docs/testnet-readiness.md` and keep them tied to the actual code path, not the aspirational design.
-- When writing readiness language, distinguish Aura/GRANDPA local smoke readiness from live Ghost PoW/PoS consensus readiness.
+- Keep `README.md`, `IMPLEMENTATION_SUMMARY.md`, this file, and `docs/*`
+  aligned with the current branch state.
+- Put launch-readiness notes in `docs/testnet-readiness.md` and keep them
+  tied to the actual code path, not the aspirational design.
+- Never claim production or testnet readiness without the corresponding
+  gate having run and passed on that tree.
