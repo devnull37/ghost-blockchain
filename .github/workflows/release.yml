@@ -1,0 +1,61 @@
+name: release
+
+# Tagged-release pipeline: `git tag v*` -> release binary + SHA256
+# checksums + bundled chainspecs + generated release notes, attached to a
+# GitHub release. Docker image publishing requires a registry credential —
+# add the docker job once one exists; the Dockerfile builds standalone
+# regardless.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  WASM_BUILD_WORKSPACE_HINT: ${{ github.workspace }}
+
+jobs:
+  release-binary:
+    name: binary + checksums
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm libclang-dev protobuf-compiler libudev-dev pkg-config
+      - name: Resolve bindgen environment
+        run: |
+          set -eux
+          echo "LIBCLANG_PATH=$(dirname "$(find /usr/lib -name 'libclang.so' | head -n1)")" >> "$GITHUB_ENV"
+          echo "BINDGEN_EXTRA_CLANG_ARGS=-I$(gcc -print-file-name=include) -I/usr/include/x86_64-linux-gnu -I/usr/include" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.88.0"
+          components: rust-src
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: release
+      - name: Build release ghost-node
+        run: cargo build --release --bin ghost-node
+      - name: Package artifacts
+        run: |
+          set -eux
+          mkdir dist
+          cp target/release/ghost-node dist/
+          cp chainspecs/local.json dist/ghost-local.json 2>/dev/null || true
+          (cd dist && sha256sum * > SHA256SUMS.txt)
+          ls -la dist
+      - name: Create GitHub release with artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eux
+          gh release create "${{ github.ref_name }}" \
+            --title "Ghost ${GITHUB_REF_NAME}" \
+            --generate-notes \
+            dist/*
