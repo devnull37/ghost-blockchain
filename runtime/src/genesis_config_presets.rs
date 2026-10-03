@@ -16,8 +16,8 @@
 // limitations under the License.
 
 use crate::{
-    AccountId, Balance, BalancesConfig, GhostConsensusConfig,
-    SessionConfig, SessionKeys, SudoConfig, UNIT,
+    AccountId, Balance, BalancesConfig, GhostConsensusConfig, SessionConfig, SessionKeys,
+    SudoConfig, UNIT,
 };
 use alloc::{vec, vec::Vec};
 use pallet_grandpa::AuthorityId as GrandpaId;
