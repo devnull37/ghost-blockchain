@@ -13,7 +13,7 @@ State on `devin/integration`:
 - `scripts/e2e-local.sh`: legacy Aura-era gate, kept for history only. It no longer passes on this base: Aura is removed, an unflagged `--dev` node authors nothing (block production needs `--mine`), and the `ghost status`/`ghost mine` CLI subcommands it calls no longer exist (only `ghost verify-pow` remains).
 - `ghost-consensus` engine crate (`consensus/ghost-consensus`): merged **and wired into `node/src/service.rs`** — `GhostPowAlgorithm` verifies every imported seal, `HeaviestChain` picks fork choice by `PowAux.total_difficulty`, `--mine` spawns the `sc-consensus-pow` mining worker plus grinding threads.
 - `ghost-pow-primitives` crate (`primitives/ghost-pow`): merged — `GhostSeal`, `POW_ENGINE_ID`, `GhostPowApi`. The runtime implements `GhostPowApi::next_difficulty`; `e2e-ghost.sh` exercises it through `state_call`.
-- `pallet-ghost-pqc`: merged — ML-DSA-87 (FIPS-204) key registry with proof-of-possession and `pqc_attest`, no_std verifier. Unit tests pass; **not yet included in the runtime**.
+- `pallet-ghost-pqc`: merged **and composed into the runtime** (index 14) — ML-DSA-87 (FIPS-204) key registry with proof-of-possession, `pqc_attest` gated to bonded validators, no_std verifier compiled into the Wasm build. `RequirePqcKey = true`: `validate()` requires a registered key, and `select_validators` re-checks `has_pqc_key` at each selection so `revoke_pqc_key` cannot keep a seat. (Genesis stakers are seeded directly and unaffected.) The pallet's `PqcRequired` storage flag is policy metadata — the runtime's `ConstBool` is the authoritative gate.
 - `pallet-ghost-consensus` (in runtime): the live staking/difficulty/reward pallet — bonded-stake validator selection via `pallet_session`, `Difficulty` retarget every 100 blocks, digest-decoded miner rewards (40% author / 60% validator split). All of these are exercised by `e2e-ghost.sh`.
 - Live Ghost consensus path in the node service: running — PoW block production (`--mine`), PoW-verifying import queue, GRANDPA finality over the stake-selected session committee.
 - Multi-node Ghost soak: `scripts/soak-ghost.sh` + `docs/soak-report.md` landed — a 4–5 node `--chain local` network with monitored invariants (finality advancing, bounded head spread, ≥1 peer, no finalized-hash forks) and scheduled miner kills. Its 300s QUICK profile passed twice; a 30–60 min full soak is still outstanding. `e2e-ghost.sh` covers the two-miner smoke scope only.
@@ -33,7 +33,7 @@ Mark each item green before calling the chain testnet-ready:
 - [x] `GhostPowApi::next_difficulty` implemented by the runtime; retarget driven by on-chain state. `e2e-ghost.sh` observes the block-200 adjustment via `state_call`.
 - [x] Miner attribution is available for reward distribution (author decoded from the seal-bound pre-runtime digest). `e2e-ghost.sh` decodes per-block coinbases from `chain_getHeader`.
 - [x] Reward distribution completes end to end — `e2e-ghost.sh` asserts free balances of the coinbase accounts (which are also genesis-staked validators) grow; the exact 40/60 split math is covered by pallet unit tests.
-- [ ] `pallet-ghost-pqc` is composed into the runtime and PQC verification works in the no_std/Wasm path.
+- [x] `pallet-ghost-pqc` is composed into the runtime and PQC verification works in the no_std/Wasm path. ML-DSA-87 verifies in the Wasm build; `validate()` and session selection both consult the registry.
 - [x] Two or more Aura/GRANDPA nodes can form a network, author blocks, finalize, and survive a validator restart. *(Historical — superseded by the Ghost gate.)*
 - [x] Two or more Ghost-consensus nodes can form a network, author blocks, finalize, and survive a restart — `e2e-ghost.sh` steps 3-6.
 - [ ] The launch checklist is reproducible by someone who did not help build the branch.
@@ -47,8 +47,12 @@ Do not schedule a public testnet until all of the following are true:
    `ghost-consensus` crate drives the import queue; Aura is removed).
 3. Reward accounting is correct on chain (digest-decoded author, 40/60 split).
 4. `pallet-ghost-pqc` is in the runtime and ML-DSA-87 validation works in the
-   Wasm build.
+   Wasm build. *(Satisfied — `GhostPqc` at index 14, `RequirePqcKey`, and the
+   bonded-validator `pqc_attest` gate all compile into the Wasm build.)*
 5. `rtk scripts/e2e-ghost.sh` (the two-node Ghost-consensus gate) passes from a clean checkout.
+6. `scripts/e2e-faults.sh` (adversarial gate) passes: miner halt/resume,
+   validator offline/rejoin, and GRANDPA equivocation → slash + removal.
+   *(Script merged; full pass pending.)*
 
 ## Runbook
 
