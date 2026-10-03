@@ -110,6 +110,7 @@ pub fn author_from_pre_digest(bytes: &[u8]) -> Result<AccountId32, codec::Error>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::verify_seal;
     use proptest::prelude::*;
 
     #[test]
@@ -204,6 +205,26 @@ mod tests {
     }
 
     proptest! {
+        #[test]
+        fn mining_and_verify_agree_on_accept_and_reject(
+            pre_hash in any::<[u8; 32]>(),
+            author in any::<[u8; 32]>(),
+            nonce in any::<u64>(),
+            diff_be in any::<[u8; 32]>(),
+        ) {
+            // `verify` (import) and `hash_meets` (mining) must reach the same
+            // verdict for every seal/difficulty pair — this pins the shared
+            // contract both paths are supposed to implement.
+            let pre_digest = miner_pre_runtime(&AccountId32::new(author));
+            let difficulty = U256::from_big_endian(&diff_be);
+            let seal = GhostSeal { nonce };
+            let expected = pow_meets(pow_value(&pre_hash, &pre_digest, &seal), difficulty);
+            prop_assert_eq!(
+                verify_seal(&pre_hash, Some(&pre_digest), &seal.encode(), difficulty),
+                expected
+            );
+        }
+
         #[test]
         fn pow_value_deterministic_and_meets_is_monotone(
             pre_hash in any::<[u8; 32]>(),

@@ -73,7 +73,12 @@ parameter_types! {
 ///
 /// This can be a tuple of types, each implementing `OnRuntimeUpgrade`.
 #[allow(unused_parens)]
-type SingleBlockMigrations = ();
+type SingleBlockMigrations = (
+    // v1 -> v2 Ghost consensus pallet storage cleanup. Unwired, the legacy
+    // u64 `Difficulty` bytes would be read as `U256` post-upgrade (see
+    // docs/security-review/round-1.md).
+    pallet_ghost_consensus::migrations::MigrateToV2<Runtime>,
+);
 
 /// The default types are being injected by [`derive_impl`](`frame_support::derive_impl`) from
 /// [`SoloChainDefaultConfig`](`struct@frame_system::config_preludes::SolochainDefaultConfig`),
@@ -168,9 +173,9 @@ impl pallet_session::historical::Config for Runtime {
 }
 
 impl pallet_authorship::Config for Runtime {
-    /// PoW authors are decoded from the pow_ digest by pallet-ghost-consensus;
-    /// there is no session-indexed author map.
-    type FindAuthor = ();
+    /// PoW authors are decoded from the `PreRuntime(pow_, AccountId)` digest
+    /// by pallet-ghost-consensus; there is no session-indexed author map.
+    type FindAuthor = pallet_ghost_consensus::PowFindAuthor<AccountId>;
     /// im-online counts authored blocks for its liveness tracking.
     type EventHandler = ImOnline;
 }

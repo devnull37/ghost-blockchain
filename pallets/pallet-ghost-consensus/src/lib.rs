@@ -110,6 +110,29 @@ impl<AccountId> PqcKeyProvider<AccountId> for () {
     }
 }
 
+/// `frame_support::traits::FindAuthor` adapter for PoW-sealed chains.
+///
+/// Decodes the miner `AccountId` from the first decodable
+/// `PreRuntime(POW_ENGINE_ID, _)` digest — the same decode `verify` enforces
+/// and `block_author` applies for rewards. Wiring it into
+/// `pallet_authorship::Config::FindAuthor` lets `pallet-im-online` credit
+/// authored blocks toward validator liveness (see
+/// docs/security-review/round-1.md); `()` never decodes anything.
+pub struct PowFindAuthor<AccountId>(core::marker::PhantomData<AccountId>);
+
+impl<AccountId: Decode> frame_support::traits::FindAuthor<AccountId> for PowFindAuthor<AccountId> {
+    fn find_author<'a, I>(digests: I) -> Option<AccountId>
+    where
+        I: 'a + IntoIterator<Item = (sp_runtime::ConsensusEngineId, &'a [u8])>,
+    {
+        digests.into_iter().find_map(|(id, data)| {
+            (id == POW_ENGINE_ID)
+                .then(|| AccountId::decode(&mut &*data).ok())
+                .flatten()
+        })
+    }
+}
+
 #[frame_support::pallet]
 pub mod pallet {
     use super::*;
@@ -860,12 +883,33 @@ pub mod pallet {
             for (details, fraction) in offenders.iter().zip(slash_fraction.iter()) {
                 let who = &details.offender.0;
                 let bonded = Bonded::<T>::get(who);
-                add_db_reads_writes(1, 0);
-                if bonded.is_zero() {
+                add_db_reads_writes(2, 1);
+
+                // Slash everything still held under the staking reason: the
+                // bonded balance AND every unbonding chunk. Chunk funds stay
+                // held until `withdraw_unbonded`, so they remain slashable —
+                // otherwise `unbond` would grant immunity to a reported
+                // offence (see docs/security-review/round-1.md).
+                let mut unbonding_cut = BalanceOf::<T>::zero();
+                Unbonding::<T>::mutate(who, |chunks| {
+                    for chunk in chunks.iter_mut() {
+                        let cut = fraction.mul_floor(chunk.amount);
+                        unbonding_cut = unbonding_cut.saturating_add(cut);
+                        chunk.amount = chunk.amount.saturating_sub(cut);
+                    }
+                    chunks.retain(|chunk| !chunk.amount.is_zero());
+                });
+                let slash_bonded = fraction.mul_floor(bonded);
+                let amount = slash_bonded.saturating_add(unbonding_cut);
+
+                // Genuinely stakeless offenders (no bonded, no unbonding
+                // chunks) are skipped entirely — there is nothing to burn or
+                // record. Offenders who merely finished `unbond` still fall
+                // through to the chill and record below.
+                if bonded.is_zero() && amount.is_zero() {
                     continue;
                 }
 
-                let amount = fraction.mul_floor(bonded);
                 if !amount.is_zero() {
                     let _ = T::Currency::burn_held(
                         &HoldReason::Staking.into(),
@@ -874,7 +918,7 @@ pub mod pallet {
                         Precision::BestEffort,
                         Fortitude::Force,
                     );
-                    let remaining = bonded.saturating_sub(amount);
+                    let remaining = bonded.saturating_sub(slash_bonded);
                     if remaining.is_zero() {
                         Bonded::<T>::remove(who);
                     } else {
@@ -902,7 +946,7 @@ pub mod pallet {
                     amount,
                     session_index: slash_session,
                 });
-                add_db_reads_writes(2, 4);
+                add_db_reads_writes(2, 6);
             }
             consumed
         }
