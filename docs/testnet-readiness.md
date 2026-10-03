@@ -54,6 +54,9 @@ Do not schedule a public testnet until all of the following are true:
    validator offline/rejoin, and GRANDPA equivocation → slash + removal.
 7. `scripts/e2e-forged-seal.sh` passes: honest nodes deterministically
    reject blocks sealed with a corrupted `pre_hash` from a patched node.
+   *(Passed on spec-103 — evil node self-authored 10 blocks, 16 honest
+   headers scanned on each of two committee nodes with zero forged imports,
+   finality reached 14 during the attack window.)*
 8. `scripts/e2e-upgrade.sh` passes: a Wasm→Wasm `sudo set_code` upgrade
    lands on a live chain and finality continues on the new spec_version.
 9. `scripts/soak-ghost.sh` completes a ≥30-min multi-node soak with no
