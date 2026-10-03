@@ -46,14 +46,26 @@ plus the runtime's `SS58Prefix`. Options:
 Recommendation: register before mainnet; acceptable to launch testnet on
 42 with the decision documented here.
 
-## Cutting the spec
+## Cutting the spec — `scripts/genesis-generate.sh`
 
-1. Write the preset in `runtime/src/genesis_config_presets.rs` (new
-   `testnet` preset — do NOT edit `local`/`development`, the e2e gates
-   depend on them).
-2. `ghost-node build-spec --chain testnet > chainspecs/testnet.json`.
-3. Commit the spec + this checklist updated with the real allocation.
-4. Publish bootnode peer ids alongside (they're in `bootNodes`).
+The launcher is `scripts/genesis-generate.sh` (no compiled-in preset —
+keys are ceremony output, never constants in the binary):
+
+1. Each launch validator generates session keys offline and publishes
+   `(account sr25519, grandpa ed25519, im_online sr25519)` + bonded
+   account to the coordinator. Addresses/keys are *public* material; the
+   secrets stay with each operator.
+2. Coordinator fills `chainspecs/ghost-testnet-params.example.json` into
+   a real params file (64-hex public keys; stakes in planck; `root` =
+   launch-ops key or `null`).
+3. `GENESIS_PARAMS=<params.json> rtk scripts/genesis-generate.sh chainspecs`
+   produces `<id>.json` + `<id>-raw.json` + `SHA256SUMS.txt`. The script
+   embeds the built runtime wasm, converts keys to SS58, and fails early
+   on malformed input — `build-spec --raw` executing the genesis builder
+   is itself the instantiation check.
+4. Every participant recomputes the raw spec hash locally and attests it
+   matches before the network boots — that hash IS the chain.
+5. Commit the params + specs; publish bootnode peer ids.
 
 ## Hard requirements before a public spec is real
 

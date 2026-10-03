@@ -1,0 +1,28 @@
+{
+  "_comment": "EXAMPLE ceremony params for scripts/genesis-generate.sh. All keys below are the WELL-KNOWN development accounts — never launch a real network with them. Generate real keys per docs/genesis-ceremony.md, then fill this file offline.",
+  "name": "Ghost Testnet 1",
+  "id": "ghost-testnet-1",
+  "chainType": "Live",
+  "bootNodes": [],
+  "root": "d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d",
+  "authorities": [
+    {
+      "account": "d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d",
+      "grandpa": "88dc3417d5058ec4b4503e0c12ea1a0a89be200fe98922423d4334014fa6b0ee",
+      "imOnline": "d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d",
+      "stake": 1000000000000000
+    },
+    {
+      "account": "8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48",
+      "grandpa": "d17c2d7823ebf260fd138f2d7e27d114c0145d968b5ff5006125f2414fadae69",
+      "imOnline": "8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48",
+      "stake": 1000000000000000
+    }
+  ],
+  "endowed": [
+    {"account": "d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d", "balance": 1152921504606846976},
+    {"account": "8eaf04151687736326c9fea17e25fc5287613693c912909cb226aa4794f26a48", "balance": 1152921504606846976},
+    {"account": "90b5ab205c6974c9ea841be688864633dc9ca8a357843eeacf2314649965fe22", "balance": 1152921504606846976}
+  ],
+  "difficulty": 1000000
+}
