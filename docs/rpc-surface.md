@@ -41,6 +41,18 @@ the string, never as protocol errors) and do no storage iteration.
 - No method anywhere returns secret material; keystore access is one-way
   (`insertKey` writes, `rotateKeys` generates internally).
 
+## Client compatibility (verified live, spec-102 binary)
+
+- `rpc_methods` reports 102 methods: the full legacy set PJS Apps /
+  subxt need (`system_*`, `chain_*`, `state_*`, `author_*`, `payment_*`)
+  plus spec-v2 (`chainHead_v1_*`, `transaction_v1_*`) for newer clients.
+- `state_getMetadata` serves a complete v1x runtime metadata blob
+  (~54 kB) — call-index/type registry intact for extrinsic builders.
+- `system_properties` now serves `ss58Format`, `tokenDecimals`,
+  `tokenSymbol` (was `{}` before; fixed) — wallets render balances
+  correctly instead of raw planck.
+- `ghost_*` methods are additive; nothing shadows upstream methods.
+
 ## Verdict
 
 Surface is minimal by construction — three custom read-only methods,
