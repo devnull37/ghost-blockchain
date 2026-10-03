@@ -6,3 +6,7 @@
 
 # soak harness output
 /soak-data/
+
+# upgrade-drill JS tooling (npm install at run time)
+node_modules/
+package-lock.json
