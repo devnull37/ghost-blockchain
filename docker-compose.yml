@@ -1,0 +1,157 @@
+# Local Ghost devnet: two Aura/GRANDPA validators on the `local` testnet spec
+# (same flags as scripts/e2e-local.sh).
+#
+#   docker compose up --build              # node-alice + node-bob
+#   docker compose --profile pow up -d     # additionally start the miner replica
+#
+# RPC:      alice http://127.0.0.1:9933   bob http://127.0.0.1:19933
+# P2P:      alice :30333                  bob :31333
+# Prom:     alice :9615                   bob :19615
+#
+# `--rpc-external`/`--prometheus-external` are dev-only conveniences so the
+# published host ports work; do not carry them into public deployments.
+
+name: ghost-devnet
+
+x-rpc-healthcheck: &rpc-healthcheck
+  test:
+    - CMD
+    - curl
+    - -fsS
+    - -H
+    - "Content-Type: application/json"
+    - -d
+    - '{"jsonrpc":"2.0","id":1,"method":"system_health","params":[]}'
+    - http://127.0.0.1:9933
+  interval: 10s
+  timeout: 5s
+  retries: 12
+  start_period: 15s
+
+services:
+  node-alice:
+    build: .
+    image: ghost-node:local
+    command:
+      - --chain
+      - local
+      - --alice
+      - --validator
+      - --base-path
+      - /data
+      - --node-key
+      - "0000000000000000000000000000000000000000000000000000000000000001"
+      - --port
+      - "30333"
+      - --rpc-port
+      - "9933"
+      - --rpc-external
+      - --rpc-cors
+      - all
+      - --prometheus-port
+      - "9615"
+      - --prometheus-external
+      - --no-telemetry
+      - -l
+      - warn
+    ports:
+      - "30333:30333"
+      - "9933:9933"
+      - "9944:9944"
+      - "9615:9615"
+    volumes:
+      - alice-data:/data
+    networks:
+      - ghost-net
+    healthcheck: *rpc-healthcheck
+
+  node-bob:
+    image: ghost-node:local
+    depends_on:
+      node-alice:
+        condition: service_healthy
+    command:
+      - --chain
+      - local
+      - --bob
+      - --validator
+      - --base-path
+      - /data
+      - --node-key
+      - "0000000000000000000000000000000000000000000000000000000000000002"
+      - --port
+      - "30333"
+      - --rpc-port
+      - "9933"
+      - --rpc-external
+      - --rpc-cors
+      - all
+      - --prometheus-port
+      - "9615"
+      - --prometheus-external
+      - --bootnodes
+      - /dns4/node-alice/tcp/30333/p2p/12D3KooWEyoppNCUx8Yx66oV9fJnriXwCcXwDDUA2kj6vnc6iDEp
+      - --no-telemetry
+      - -l
+      - warn
+    ports:
+      - "31333:30333"
+      - "19933:9933"
+      - "19944:9944"
+      - "19615:9615"
+    volumes:
+      - bob-data:/data
+    networks:
+      - ghost-net
+    healthcheck: *rpc-healthcheck
+
+  # Forward-compatible PoW miner scaffolding. The `--mine` flag does not exist
+  # in the node CLI yet — the consensus workstream adds it. Until then this
+  # service runs as a plain full node, and only under `--profile pow` so the
+  # default compose topology stays a pure Aura/GRANDPA validator pair.
+  miner:
+    image: ghost-node:local
+    profiles:
+      - pow
+    depends_on:
+      node-alice:
+        condition: service_healthy
+      node-bob:
+        condition: service_healthy
+    command:
+      # TODO(consensus workstream): once the PoW CLI lands, append e.g.
+      #   --mine --miner-threads 4 --miner-coinbase <account>
+      # so this service authors PoW blocks instead of just syncing.
+      - --chain
+      - local
+      - --base-path
+      - /data
+      - --port
+      - "30333"
+      - --rpc-port
+      - "9933"
+      - --rpc-external
+      - --rpc-cors
+      - all
+      - --bootnodes
+      - /dns4/node-alice/tcp/30333/p2p/12D3KooWEyoppNCUx8Yx66oV9fJnriXwCcXwDDUA2kj6vnc6iDEp
+      - --no-telemetry
+      - -l
+      - warn
+    ports:
+      - "32333:30333"
+      - "29933:9933"
+    volumes:
+      - miner-data:/data
+    networks:
+      - ghost-net
+    healthcheck: *rpc-healthcheck
+
+volumes:
+  alice-data:
+  bob-data:
+  miner-data:
+
+networks:
+  ghost-net:
+    driver: bridge
