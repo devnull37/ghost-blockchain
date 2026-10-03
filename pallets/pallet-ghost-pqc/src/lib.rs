@@ -106,7 +106,15 @@ pub mod pallet {
         type BondedValidators: BondedValidatorProvider<Self::AccountId>;
     }
 
+    /// On-chain storage version — always stamped (genesis writes it), so a
+    /// future migration can gate on `on_chain_storage_version` instead of
+    /// sniffing state. Bump + wire `Hooks::on_runtime_upgrade` per
+    /// docs/runtime-upgrade-policy.md when layout changes.
+    const STORAGE_VERSION: frame_support::traits::StorageVersion =
+        frame_support::traits::StorageVersion::new(1);
+
     #[pallet::pallet]
+    #[pallet::storage_version(STORAGE_VERSION)]
     pub struct Pallet<T>(_);
 
     /// Registry of ML-DSA-87 public keys. One key per account.

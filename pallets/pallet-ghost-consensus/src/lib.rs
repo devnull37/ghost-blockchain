@@ -802,6 +802,14 @@ pub mod pallet {
                 None => Self::deposit_event(Event::BlockRewardSkipped { block_number: n }),
             }
         }
+
+        /// Storage migrations — `Executive` runs this on every runtime
+        /// upgrade through `AllPalletsWithSystem`; internally gated on the
+        /// on-chain `StorageVersion`, so it's a no-op when current.
+        fn on_runtime_upgrade() -> Weight {
+            use frame_support::traits::OnRuntimeUpgrade;
+            migrations::MigrateToV2::<T>::on_runtime_upgrade()
+        }
     }
 
     /// `pallet_session::SessionManager`: select the validator set per session.
