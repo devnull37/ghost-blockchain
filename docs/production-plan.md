@@ -37,25 +37,25 @@ Release bar: the standard a top-tier organization would apply before shipping a 
 ### Security & economics hardening
 - [x] Written threat model (docs/threat-model.md): adversary classes, per-attack mitigations vs residual risk, known-gaps register — PR #12
 - [x] Economic parameter doc: docs/economic-parameters.md — every constant named to its runtime definition, reward split math, liveness failure semantics
-- [ ] `cargo deny`/`cargo audit` in CI: `audit` job landed (rustsec/audit-check@v2 on the committed lockfile); `cargo deny` (licenses/bans) still pending. `unsafe` remains forbidden
+- [x] `cargo deny`/`cargo audit` in CI: `audit` (rustsec/audit-check) + `deny` (licenses/sources hard gate, bans warn) jobs landed. `unsafe` remains forbidden
 - [x] External-style security review: round-1 (PR #14, 19 findings, C-1/H-1/H-2 fixed) + round-2 (docs/security-review/round-2.md — R2-1/R2-2 fixed in place, 4 accepted residuals documented)
 - [x] Session key ops documented: docs/operator-guide.md — rotateKeys/set_keys, NextKeys boundary timing, PQC register/rotate flow, equivocation warning, slashing table
-- [ ] RPC surface audit: unsafe methods denied by default, `--rpc-methods` guidance, no key material in RPC
+- [x] RPC surface audit: docs/rpc-surface.md — full method inventory, DenyUnsafe plumbing verified, `--rpc-methods` guidance
 
 ### Runtime quality
-- [ ] `spec_version`/`impl_version`/`transaction_version` bump policy documented; first runtime-upgrade (Wasm→Wasm) exercised on a devnet before testnet
+- [ ] `spec_version`/`impl_version`/`transaction_version` bump policy documented (docs/runtime-upgrade-policy.md); upgrade drill (Wasm→Wasm via set_code on a devnet) still pending
 - [ ] Storage migration framework convention (versioned storage, `OnRuntimeUpgrade` hooks) + a tested no-op migration
-- [ ] Genesis ceremony doc for public testnet: allocation table, validator onboarding, bootnode list, chain spec JSON published in-repo (`chainspecs/`)
-- [ ] SS58 prefix decision documented (registered prefix or justified default)
+- [ ] Genesis ceremony doc for public testnet: docs/genesis-ceremony.md + `chainspecs/local.json` published; the `testnet` preset + real allocation table still must be created
+- [x] SS58 prefix decision documented (docs/genesis-ceremony.md — default 42 acceptable for testnet, registration required before mainnet)
 - [ ] Remove `pallet-template` and `sudo` from production preset: pallet-template fully removed from the runtime (crate deleted, spec_version 102). sudo removal is a chainspec-preset decision — tracked under the genesis ceremony item
 
 ### Ops maturity
-- [ ] Telemetry endpoints configured + Prometheus metrics list documented (block height, finality lag, peers, mining hashrate)
-- [ ] Node ops docs: hardware spec, `--pruning` guidance, archive vs full node, backup/restore, upgrade procedure, incident runbook
-- [ ] Release pipeline: tagged release → reproducible binary + versioned Docker image + checksums + release notes template
+- [x] Telemetry/metrics documented (docs/node-ops.md — alert table, best-vs-finalized diagnostics; honest note: no dedicated hashrate metric yet)
+- [x] Node ops docs (docs/node-ops.md): sizing, pruning, metrics, telemetry, upgrades, keystore/backup, incident runbook
+- [ ] Release pipeline: tagged release → reproducible binary + versioned Docker image + checksums + release notes template — CI builds the artifact; release/tag flow still pending
 - [ ] Polkadot.js Apps compatibility verified (metadata + custom types, ss58, signing)
-- [ ] Testnet faucet plan documented (crate-independent, e.g. bot or pallet-gated drip) — not necessarily implemented
-- [ ] Docs complete: protocol spec ✓, SECURITY.md ✓, operator guide (validator+miner) ✓, economic parameters ✓; remaining: builder/dev docs, contribution + code of conduct, changelog policy
+- [x] Testnet faucet plan documented (docs/faucet-plan.md — off-chain drip bot design, not implemented)
+- [x] Docs complete: protocol spec, SECURITY.md, operator guide, economic parameters, node-ops, genesis ceremony, faucet plan, RPC audit, upgrade policy, CONTRIBUTING, CODE_OF_CONDUCT, CHANGELOG ✓
 
 ## P2 — Post-testnet / pre-mainnet backlog (tracked, not necessarily built)
 - [ ] Public testnet metrics: finalized-head SLO, peer diversity, upgrade drill
