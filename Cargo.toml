@@ -109,8 +109,9 @@ sp-timestamp = { git = "https://github.com/paritytech/polkadot-sdk.git", branch 
 codec = { package = "parity-scale-codec", version = "3.7.5", default-features = false, features = ["derive"] }
 scale-info = { version = "2.11.6", default-features = false, features = ["derive"] }
 
-# PQC: pure-Rust Dilithium5 verifier, no_std-capable (for runtime/Wasm use).
-pqc_dilithium = { version = "0.5", default-features = false }
+# PQC: pure-Rust ML-DSA (FIPS-204) verifier — no_std, compiles to Wasm.
+# (pqc_dilithium 0.5 does not exist and 0.2 is std-only; see pallet-ghost-pqc.)
+ml-dsa = { version = "0.1", default-features = false }
 
 # Property-based testing (dev-dependency only).
 proptest = { version = "1.5", default-features = false, features = ["std", "alloc"] }
