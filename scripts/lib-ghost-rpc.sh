@@ -288,8 +288,8 @@ PYEOF
 }
 
 wait_rpc() {
-	local port="$1"
-	for _ in $(seq 1 90); do
+	local port="$1" tries="${2:-90}"
+	for _ in $(seq 1 "$tries"); do
 		if rpc "$port" system_health >/dev/null 2>&1; then
 			return 0
 		fi

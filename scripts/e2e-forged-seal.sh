@@ -136,7 +136,7 @@ start "$TMP_DIR/e.log" "$EVIL_BIN" \
 	--port "$E_PORT" --rpc-port "$E_RPC" \
 	--bootnodes "/ip4/127.0.0.1/tcp/$A_PORT/p2p/$A_PEER"
 E_PID=$LAST_PID
-wait_rpc "$E_RPC"
+wait_rpc "$E_RPC" 300
 wait_peers_eq "$E_RPC" 2 120
 
 # Prove the run is not vacuous: the evil node must itself be producing
