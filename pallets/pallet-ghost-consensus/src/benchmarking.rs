@@ -34,8 +34,7 @@ fn funded<T: Config>(index: u32) -> T::AccountId {
 /// Establish `Bonded` state exactly as `do_bond` leaves it (hold + map entry),
 /// without running the extrinsic — setup only.
 fn bond_in_storage<T: Config>(who: &T::AccountId, amount: BalanceOf<T>) {
-    T::Currency::hold(&HoldReason::Staking.into(), who, amount)
-        .expect("benchmark hold succeeds");
+    T::Currency::hold(&HoldReason::Staking.into(), who, amount).expect("benchmark hold succeeds");
     Bonded::<T>::insert(who, amount);
 }
 
@@ -296,13 +295,11 @@ mod measure {
                 return;
             }
             let mut keys = self.keys.borrow_mut();
-            let rec = keys
-                .entry(key.to_vec())
-                .or_insert_with(|| {
-                    let size = key.len() + value.as_ref().map_or(0, |v| v.len());
-                    self.pov_bytes.set(self.pov_bytes.get() + size as u64);
-                    KeyRecord::default()
-                });
+            let rec = keys.entry(key.to_vec()).or_insert_with(|| {
+                let size = key.len() + value.as_ref().map_or(0, |v| v.len());
+                self.pov_bytes.set(self.pov_bytes.get() + size as u64);
+                KeyRecord::default()
+            });
             if write {
                 rec.writes += 1;
             } else {
@@ -322,10 +319,7 @@ mod measure {
             Ok(value)
         }
 
-        fn storage_hash(
-            &self,
-            key: &[u8],
-        ) -> Result<Option<sp_core::H256>, Self::Error> {
+        fn storage_hash(&self, key: &[u8]) -> Result<Option<sp_core::H256>, Self::Error> {
             let hash = self.inner.borrow().storage_hash(key)?;
             self.record(key, &None, false);
             Ok(hash)
@@ -659,7 +653,11 @@ mod measure {
                 p, lo, hi
             ));
         }
-        f.push_str(&format!("    fn {}({}) -> Weight {{\n", name, param_decls.join(", ")));
+        f.push_str(&format!(
+            "    fn {}({}) -> Weight {{\n",
+            name,
+            param_decls.join(", ")
+        ));
         f.push_str("        // Proof Size summary in bytes:\n");
         f.push_str(&format!(
             "        //  Measured:  `{}`\n        //  Estimated: `{}`\n",
@@ -773,7 +771,11 @@ mod measure {
             ));
             table.push_str(&format!(
                 "| {} | {} | {} | {} | {} |\n",
-                name, fmt_num(time.base), reads.base, writes.base, proof_base
+                name,
+                fmt_num(time.base),
+                reads.base,
+                writes.base,
+                proof_base
             ));
         }
 

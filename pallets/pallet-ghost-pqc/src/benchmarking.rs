@@ -80,7 +80,11 @@ mod benchmarks {
         assert_eq!(proof_of_possession.len(), PQC_SIGNATURE_BYTES);
 
         #[extrinsic_call]
-        _(RawOrigin::Signed(who.clone()), public_key, proof_of_possession);
+        _(
+            RawOrigin::Signed(who.clone()),
+            public_key,
+            proof_of_possession,
+        );
 
         assert!(PqcKeys::<T>::contains_key(&who));
         Ok(())
@@ -114,10 +118,9 @@ mod benchmarks {
             .map_err(|_| BenchmarkError::Stop("key fits bound"))?;
         PqcKeys::<T>::insert(&who, key);
 
-        let block_hash = <T::Hash as codec::Decode>::decode(
-            &mut &sp_core::H256::repeat_byte(42)[..],
-        )
-        .expect("hash decodes");
+        let block_hash =
+            <T::Hash as codec::Decode>::decode(&mut &sp_core::H256::repeat_byte(42)[..])
+                .expect("hash decodes");
         let signature = sig_bytes(&sk, block_hash.as_ref());
         assert_eq!(signature.len(), PQC_SIGNATURE_BYTES);
 
@@ -223,13 +226,11 @@ mod measure {
                 return;
             }
             let mut keys = self.keys.borrow_mut();
-            let rec = keys
-                .entry(key.to_vec())
-                .or_insert_with(|| {
-                    let size = key.len() + value.as_ref().map_or(0, |v| v.len());
-                    self.pov_bytes.set(self.pov_bytes.get() + size as u64);
-                    KeyRecord::default()
-                });
+            let rec = keys.entry(key.to_vec()).or_insert_with(|| {
+                let size = key.len() + value.as_ref().map_or(0, |v| v.len());
+                self.pov_bytes.set(self.pov_bytes.get() + size as u64);
+                KeyRecord::default()
+            });
             if write {
                 rec.writes += 1;
             } else {
@@ -249,10 +250,7 @@ mod measure {
             Ok(value)
         }
 
-        fn storage_hash(
-            &self,
-            key: &[u8],
-        ) -> Result<Option<sp_core::H256>, Self::Error> {
+        fn storage_hash(&self, key: &[u8]) -> Result<Option<sp_core::H256>, Self::Error> {
             let hash = self.inner.borrow().storage_hash(key)?;
             self.record(key, &None, false);
             Ok(hash)
@@ -484,10 +482,9 @@ mod measure {
         let mut overlay = OverlayedChanges::<H>::default();
         let mut ext = Ext::new(&mut overlay, &backend, None);
         let results = sp_externalities::set_and_run_with_externalities(&mut ext, || {
-            <GhostPqc<Test> as Benchmarking>::run_benchmark(name, c, &[], verify, 1)
-                .unwrap_or_else(|e| {
-                    panic!("benchmark {:?} components {:?} failed: {:?}", name, c, e)
-                })
+            <GhostPqc<Test> as Benchmarking>::run_benchmark(name, c, &[], verify, 1).unwrap_or_else(
+                |e| panic!("benchmark {:?} components {:?} failed: {:?}", name, c, e),
+            )
         });
         results
             .into_iter()
@@ -503,11 +500,8 @@ mod measure {
             let steps = (STEPS.min((*high - *low).max(1)) + 1) as u64;
             for s in 0..steps {
                 let v = low + (((*high - *low) as u64 * s) / (steps - 1).max(1)) as u32;
-                let mut c: Vec<(BenchmarkParameter, u32)> = meta
-                    .components
-                    .iter()
-                    .map(|(p, _, h)| (*p, *h))
-                    .collect();
+                let mut c: Vec<(BenchmarkParameter, u32)> =
+                    meta.components.iter().map(|(p, _, h)| (*p, *h)).collect();
                 c[i] = (*param, v);
                 all.push(c);
             }
@@ -566,12 +560,20 @@ mod measure {
             .iter()
             .zip(is_used.iter())
             .map(|((p, _, _), used)| {
-                format!("{}{}: u32", if *used { "" } else { "_" }, format!("{:?}", p))
+                format!(
+                    "{}{}: u32",
+                    if *used { "" } else { "_" },
+                    format!("{:?}", p)
+                )
             })
             .collect();
 
         let mut f = String::new();
-        f.push_str(&format!("    fn {}({}) -> Weight {{\n", name, param_decls.join(", ")));
+        f.push_str(&format!(
+            "    fn {}({}) -> Weight {{\n",
+            name,
+            param_decls.join(", ")
+        ));
         f.push_str("        // Proof Size summary in bytes:\n");
         f.push_str(&format!(
             "        //  Measured:  `{}`\n        //  Estimated: `{}`\n",
@@ -611,7 +613,9 @@ mod measure {
             }
             f.push_str(&format!(
                 "            .saturating_add({db}.reads({}_u64).saturating_mul(({:?}).into()))\n",
-                slope, p, db = db
+                slope,
+                p,
+                db = db
             ));
         }
         for (i, (p, _, _)) in params.iter().enumerate() {
@@ -621,7 +625,9 @@ mod measure {
             }
             f.push_str(&format!(
                 "            .saturating_add({db}.writes({}_u64).saturating_mul(({:?}).into()))\n",
-                slope, p, db = db
+                slope,
+                p,
+                db = db
             ));
         }
         if reads.base != 0 {
@@ -705,7 +711,11 @@ mod measure {
             ));
             table.push_str(&format!(
                 "| {} | {} | {} | {} | {} |\n",
-                name, fmt_num(time.base), reads.base, writes.base, proof_base
+                name,
+                fmt_num(time.base),
+                reads.base,
+                writes.base,
+                proof_base
             ));
         }
 
@@ -732,10 +742,7 @@ mod measure {
                 .join("\n"),
         );
         out.push_str("}\n");
-        let path = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/src/weights.rs"
-        );
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/src/weights.rs");
         std::fs::write(path, out).expect("write weights.rs");
         eprintln!("wrote {}", path);
     }
