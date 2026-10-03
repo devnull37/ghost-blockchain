@@ -31,9 +31,10 @@ pub const POW_ENGINE_ID: [u8; 4] = *b"pow_";
 /// PoW seal attached to a block header.
 ///
 /// The PoW hash is computed over `pre_hash ++ pre_digest ++ seal.encode()`
-/// (double BLAKE2-256) and interpreted as a little-endian U256; the seal is
-/// valid when that value does not exceed the per-block difficulty target
-/// returned by [`GhostPowApi::next_difficulty`].
+/// (double BLAKE2-256) and interpreted as a big-endian U256 work factor; the
+/// seal is valid when `value * difficulty <= U256::MAX`, i.e. when `value`
+/// does not exceed `U256::MAX / difficulty`, where `difficulty` is the
+/// per-block work factor returned by [`GhostPowApi::next_difficulty`].
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Encode, Decode, TypeInfo)]
 pub struct GhostSeal {
     /// Counter the miner incremented until the PoW hash met the target.

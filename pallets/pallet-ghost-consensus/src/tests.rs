@@ -564,6 +564,163 @@ fn on_offence_applies_fraction_per_offender() {
     });
 }
 
+#[test]
+fn on_offence_slashes_unbonding_chunks_too() {
+    new_test_ext().execute_with(|| {
+        // Regression test for round-1 finding: `unbond` must not grant slash
+        // immunity. Chunk funds stay held, so they stay slashable.
+        assert_ok!(GhostConsensus::bond(RuntimeOrigin::signed(ALICE), 400));
+        assert_ok!(GhostConsensus::unbond(RuntimeOrigin::signed(ALICE), 200));
+        assert_eq!(on_hold(ALICE), 400); // 200 bonded + 200 unbonding
+
+        let issuance_before = Balances::total_issuance();
+        slash(&[(ALICE, 400)], &[Perbill::from_percent(50)], 3);
+
+        // 50% of the bonded half (100) plus 50% of the chunk (100) burned.
+        assert_eq!(GhostConsensus::bonded(&ALICE), 100);
+        let chunks = crate::Unbonding::<Test>::get(ALICE);
+        assert_eq!(chunks.len(), 1);
+        assert_eq!(chunks[0].amount, 100);
+        assert_eq!(on_hold(ALICE), 200);
+        assert_eq!(Balances::total_issuance(), issuance_before - 200);
+
+        // After maturity only the slashed-down chunk releases.
+        System::set_block_number(1 + UNBONDING_PERIOD);
+        assert_ok!(GhostConsensus::withdraw_unbonded(RuntimeOrigin::signed(
+            ALICE
+        )));
+        assert_eq!(on_hold(ALICE), 100);
+        // 10_000 endowed - 100 still held (bonded) - 200 burned by the slash.
+        assert_eq!(Balances::free_balance(ALICE), 10_000 - 100 - 200);
+    });
+}
+
+#[test]
+fn on_offence_full_unbond_does_not_escape_chill_or_slash() {
+    new_test_ext().execute_with(|| {
+        // Worst case of the same bug: unbond *everything* used to zero the
+        // slash and even skip the chill via the early `continue`.
+        bond_and_validate(ALICE, 400);
+        <GhostConsensus as pallet_session::SessionManager<AccountId>>::new_session_genesis(0);
+        <GhostConsensus as pallet_session::SessionManager<AccountId>>::start_session(0);
+        assert_ok!(GhostConsensus::unbond(RuntimeOrigin::signed(ALICE), 400));
+        assert_eq!(GhostConsensus::bonded(&ALICE), 0);
+        assert_eq!(on_hold(ALICE), 400);
+
+        slash(&[(ALICE, 400)], &[Perbill::from_percent(25)], 3);
+
+        // 25% of the unbonding chunk is burned and the offender is chilled.
+        assert_eq!(on_hold(ALICE), 300);
+        assert!(!crate::Candidates::<Test>::get().contains(&ALICE));
+        assert!(!crate::ActiveValidators::<Test>::get().contains(&ALICE));
+        let records = crate::SlashRecords::<Test>::get();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].amount, 100);
+    });
+}
+
+#[test]
+fn on_offence_drains_all_chunks_at_full_slash() {
+    new_test_ext().execute_with(|| {
+        assert_ok!(GhostConsensus::bond(RuntimeOrigin::signed(ALICE), 400));
+        for _ in 0..4 {
+            assert_ok!(GhostConsensus::unbond(RuntimeOrigin::signed(ALICE), 100));
+        }
+        assert_eq!(GhostConsensus::bonded(&ALICE), 0);
+        assert_eq!(on_hold(ALICE), 400);
+
+        slash(&[(ALICE, 400)], &[Perbill::from_percent(100)], 3);
+
+        assert_eq!(on_hold(ALICE), 0);
+        assert!(crate::Unbonding::<Test>::get(ALICE).is_empty());
+        assert_eq!(crate::SlashRecords::<Test>::get()[0].amount, 400);
+    });
+}
+
+// ---------------------------------------------------------------------------
+// PowFindAuthor (authorship -> im-online liveness)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn pow_find_author_decodes_pow_preruntime() {
+    new_test_ext().execute_with(|| {
+        let alice_bytes = ALICE.encode();
+        let items: Vec<(sp_runtime::ConsensusEngineId, &[u8])> =
+            vec![(POW_ENGINE_ID, alice_bytes.as_slice())];
+        assert_eq!(
+            <crate::PowFindAuthor<AccountId> as frame_support::traits::FindAuthor<
+                AccountId,
+            >>::find_author(items),
+            Some(ALICE)
+        );
+    });
+}
+
+#[test]
+fn pow_find_author_ignores_non_pow_and_undecodable() {
+    new_test_ext().execute_with(|| {
+        let alice_bytes = ALICE.encode();
+        // Wrong engine id.
+        let items: Vec<(sp_runtime::ConsensusEngineId, &[u8])> =
+            vec![(*b"aura", alice_bytes.as_slice())];
+        assert_eq!(
+            <crate::PowFindAuthor<AccountId> as frame_support::traits::FindAuthor<
+                AccountId,
+            >>::find_author(items),
+            None
+        );
+        // Undecodable payload.
+        let bad: &[u8] = &[0xde, 0xad];
+        let items: Vec<(sp_runtime::ConsensusEngineId, &[u8])> = vec![(POW_ENGINE_ID, bad)];
+        assert_eq!(
+            <crate::PowFindAuthor<AccountId> as frame_support::traits::FindAuthor<
+                AccountId,
+            >>::find_author(items),
+            None
+        );
+        // Empty input.
+        assert_eq!(
+            <crate::PowFindAuthor<AccountId> as frame_support::traits::FindAuthor<
+                AccountId,
+            >>::find_author(core::iter::empty()),
+            None
+        );
+        // First undecodable pow_ item, second decodable: takes the decodable
+        // one (same find_map semantics as `block_author`).
+        let bad: &[u8] = &[0xde, 0xad];
+        let items: Vec<(sp_runtime::ConsensusEngineId, &[u8])> = vec![
+            (POW_ENGINE_ID, bad),
+            (POW_ENGINE_ID, alice_bytes.as_slice()),
+        ];
+        assert_eq!(
+            <crate::PowFindAuthor<AccountId> as frame_support::traits::FindAuthor<
+                AccountId,
+            >>::find_author(items),
+            Some(ALICE)
+        );
+    });
+}
+
+// ---------------------------------------------------------------------------
+// Retarget boundary pinning
+// ---------------------------------------------------------------------------
+
+#[test]
+fn retarget_exact_clamp_boundaries() {
+    new_test_ext().execute_with(|| {
+        run_to_block(RETARGET_INTERVAL, TARGET_BLOCK_TIME_MS); // baseline only
+
+        // elapsed == expected * 4 exactly: lands on the /4 boundary.
+        run_to_block(2 * RETARGET_INTERVAL, TARGET_BLOCK_TIME_MS * 4);
+        assert_eq!(crate::Difficulty::<Test>::get(), U256::from(250u64));
+
+        // elapsed * 4 == expected exactly: lands on the *4 boundary.
+        crate::Difficulty::<Test>::put(U256::from(1_000u64));
+        run_to_block(3 * RETARGET_INTERVAL, TARGET_BLOCK_TIME_MS / 4);
+        assert_eq!(crate::Difficulty::<Test>::get(), U256::from(4_000u64));
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Migration v1 -> v2
 // ---------------------------------------------------------------------------
