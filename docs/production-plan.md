@@ -15,7 +15,7 @@ Release bar: the standard a top-tier organization would apply before shipping a 
 - [x] Rewards: 40% miner / 60% active validators minted on-chain — PR #10; issuance-conservation test present
 - [x] Staking: bond/bond_extra/unbond/withdraw_unbonded (holds) + validate/chill + MinStake + bounded unbonding chunks — PR #10
 - [x] Slashing: GRANDPA equivocation → offences → slash + chill incl. unbonding chunks (no unbond-immunity) — PR #10 + #14 (H-1); downtime heartbeats via im-online + PowFindAuthor (H-2)
-- [ ] All consensus-relevant storage bounded; no unbounded iteration in any hot path (review-signed-off) — round-1 review cleared the pallet; sign-off at round-2
+- [x] All consensus-relevant storage bounded; no unbounded iteration in any hot path — round-1 cleared the pallet; round-2 signed off all post-round-1 deltas (docs/security-review/round-2.md)
 - [x] Real weights: benchmarks for all 10 extrinsics + checked-in `weights.rs` — PR #15 (regenerate via node CLI pending)
 
 ### Correctness & safety engineering
@@ -24,7 +24,7 @@ Release bar: the standard a top-tier organization would apply before shipping a 
 - [x] Fuzz target for seal decode + digest parsing (bounded input, no panic on arbitrary bytes) — PR #18 (4 cargo-fuzz targets ~17M execs zero crashes + found real retarget-math divergence, fixed via shared `compute_next_difficulty`)
 - [x] e2e on the Ghost path (`scripts/e2e-ghost.sh`): 2 miners + committee peer, author PoW blocks (seal digests via RPC), finalize, rewards land, restart+rejoin — PR #17 (7-check gate, CI e2e job repointed at it)
 - [ ] Soak (`scripts/soak-ghost.sh`): ≥4 nodes, ≥30 min, mixed restarts, finalized-head agreement, no finality stall — harness merged (PR #16); found `MinimumPeriod` ratchet (fixed 41abc2d, validated: rejects 90→0, rate 3.3×); full ≥30min run still pending
-- [ ] Failure-mode tests: miner halts (finality continues/liveness documented), validator offline (downtime slash fires), equivocation injected (slash fires) — partial (im-online path exists); adversarial e2e pending
+- [ ] Failure-mode tests: `scripts/e2e-faults.sh` merged — scenario A miner halt (finality catches frozen best, no overshoot, resumes), B committee member offline (best advances, finality pinned, resumes), C equivocation (on-chain slash + offender identity in SlashRecords); full pass pending
 
 ### Ops baseline
 - [x] CI on every PR: fmt, clippy, tests, node build, e2e-smoke — PR #8 (6 jobs green)
@@ -36,10 +36,10 @@ Release bar: the standard a top-tier organization would apply before shipping a 
 
 ### Security & economics hardening
 - [x] Written threat model (docs/threat-model.md): adversary classes, per-attack mitigations vs residual risk, known-gaps register — PR #12
-- [ ] Economic parameter doc: issuance schedule, fee model, slash parameters, retarget constants — each with rationale
-- [ ] `cargo deny`/`cargo audit` in CI (advisories, licenses, bans); `unsafe` remains forbidden
-- [ ] External-style security review: round-1 done — PR #14 (19 findings, C-1/H-1/H-2 fixed in place, docs/security-review/round-1.md); round-2 after e2e/soak + remaining mediums
-- [ ] Session key ops documented: `set_keys`, key rotation, validator migration runbook
+- [x] Economic parameter doc: docs/economic-parameters.md — every constant named to its runtime definition, reward split math, liveness failure semantics
+- [ ] `cargo deny`/`cargo audit` in CI: `audit` job landed (rustsec/audit-check@v2 on the committed lockfile); `cargo deny` (licenses/bans) still pending. `unsafe` remains forbidden
+- [x] External-style security review: round-1 (PR #14, 19 findings, C-1/H-1/H-2 fixed) + round-2 (docs/security-review/round-2.md — R2-1/R2-2 fixed in place, 4 accepted residuals documented)
+- [x] Session key ops documented: docs/operator-guide.md — rotateKeys/set_keys, NextKeys boundary timing, PQC register/rotate flow, equivocation warning, slashing table
 - [ ] RPC surface audit: unsafe methods denied by default, `--rpc-methods` guidance, no key material in RPC
 
 ### Runtime quality
@@ -47,7 +47,7 @@ Release bar: the standard a top-tier organization would apply before shipping a 
 - [ ] Storage migration framework convention (versioned storage, `OnRuntimeUpgrade` hooks) + a tested no-op migration
 - [ ] Genesis ceremony doc for public testnet: allocation table, validator onboarding, bootnode list, chain spec JSON published in-repo (`chainspecs/`)
 - [ ] SS58 prefix decision documented (registered prefix or justified default)
-- [ ] Remove `pallet-template` and `sudo` from production preset (sudo kept only in dev/testnet spec with a documented removal plan)
+- [ ] Remove `pallet-template` and `sudo` from production preset: pallet-template fully removed from the runtime (crate deleted, spec_version 102). sudo removal is a chainspec-preset decision — tracked under the genesis ceremony item
 
 ### Ops maturity
 - [ ] Telemetry endpoints configured + Prometheus metrics list documented (block height, finality lag, peers, mining hashrate)
@@ -55,7 +55,7 @@ Release bar: the standard a top-tier organization would apply before shipping a 
 - [ ] Release pipeline: tagged release → reproducible binary + versioned Docker image + checksums + release notes template
 - [ ] Polkadot.js Apps compatibility verified (metadata + custom types, ss58, signing)
 - [ ] Testnet faucet plan documented (crate-independent, e.g. bot or pallet-gated drip) — not necessarily implemented
-- [ ] Docs complete: whitepaper-grade protocol spec (`docs/protocol-spec.md`), validator guide, miner guide, builder/dev docs, security policy (`SECURITY.md`), contribution + code of conduct, changelog policy
+- [ ] Docs complete: protocol spec ✓, SECURITY.md ✓, operator guide (validator+miner) ✓, economic parameters ✓; remaining: builder/dev docs, contribution + code of conduct, changelog policy
 
 ## P2 — Post-testnet / pre-mainnet backlog (tracked, not necessarily built)
 - [ ] Public testnet metrics: finalized-head SLO, peer diversity, upgrade drill
@@ -66,4 +66,4 @@ Release bar: the standard a top-tier organization would apply before shipping a 
 - [ ] Deterministic builds (reproducible) and release signing
 
 ## Execution model
-Orchestrator assigns one workstream per child session; children branch off `devin/integration` (staging branch containing the ratified design docs + seeded deps), open ONE PR back to `devin/integration`, keep `cargo test` + e2e green. Integration merges into `main` via PR #7 once the foundation PR lands. Nothing merges without: (a) tests green, (b) review pass (a reviewer child + orchestrator check), (c) docs updated in the same PR. Checkboxes get ticked only with a link to the merged PR/commit that proves it.
+All work now lands directly on `devin/integration` in small verified commits (single-operator flow — no more child sessions). Integration merges into `main` via PR #7 once the merge policy is decided. Nothing lands without: (a) tests green, (b) a review pass over the delta, (c) docs updated in the same commit. Checkboxes get ticked only with a link to the commit/run that proves it.
