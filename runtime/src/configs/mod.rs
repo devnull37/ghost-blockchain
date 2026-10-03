@@ -26,23 +26,32 @@
 // Substrate and Polkadot dependencies
 use frame_support::{
     derive_impl, parameter_types,
-    traits::{ConstBool, ConstU128, ConstU32, ConstU64, ConstU8, VariantCountOf},
+    traits::{
+        ConstBool, ConstU128, ConstU32, ConstU64, ConstU8, KeyOwnerProofSystem, VariantCountOf,
+    },
     weights::{
         constants::{RocksDbWeight, WEIGHT_REF_TIME_PER_SECOND},
         IdentityFee, Weight,
     },
 };
 use frame_system::limits::{BlockLength, BlockWeights};
+use pallet_grandpa::AuthorityId as GrandpaId;
+use pallet_im_online::sr25519::AuthorityId as ImOnlineId;
 use pallet_transaction_payment::{ConstFeeMultiplier, FungibleAdapter, Multiplier};
-use sp_consensus_aura::sr25519::AuthorityId as AuraId;
-use sp_runtime::{traits::One, Perbill};
+use sp_core::{crypto::KeyTypeId, U256};
+use sp_runtime::{
+    traits::{Convert, One, OpaqueKeys, Zero},
+    transaction_validity::TransactionPriority,
+    Perbill,
+};
 use sp_version::RuntimeVersion;
 
 // Local module imports
 use super::{
-    AccountId, Aura, Balance, Balances, Block, BlockNumber, Hash, Nonce, PalletInfo, Runtime,
-    RuntimeCall, RuntimeEvent, RuntimeFreezeReason, RuntimeHoldReason, RuntimeOrigin, RuntimeTask,
-    System, EXISTENTIAL_DEPOSIT, SLOT_DURATION, VERSION,
+    AccountId, Balance, Balances, Block, BlockNumber, GhostConsensus, Hash, Historical, ImOnline,
+    Nonce, Offences, PalletInfo, Runtime, RuntimeCall, RuntimeEvent, RuntimeFreezeReason,
+    RuntimeHoldReason, RuntimeOrigin, RuntimeTask, SessionKeys, Signature, System, DAYS,
+    EXISTENTIAL_DEPOSIT, SLOT_DURATION, UNIT, VERSION,
 };
 
 const NORMAL_DISPATCH_RATIO: Perbill = Perbill::from_percent(75);
@@ -97,30 +106,126 @@ impl frame_system::Config for Runtime {
     type SingleBlockMigrations = SingleBlockMigrations;
 }
 
-impl pallet_aura::Config for Runtime {
-    type AuthorityId = AuraId;
-    type DisabledValidators = ();
-    type MaxAuthorities = ConstU32<32>;
-    type AllowMultipleBlocksPerSlot = ConstBool<false>;
-    type SlotDuration = pallet_aura::MinimumPeriodTimesTwo<Runtime>;
+/// Session length in blocks (design doc: 20 for dev chains).
+pub const SESSION_PERIOD: u32 = 20;
+
+parameter_types! {
+    pub const Period: u32 = SESSION_PERIOD;
+    pub const Offset: u32 = 0;
+    /// Equivocation reports are valid this many blocks after the offence.
+    pub const ReportLongevity: u64 = 20 * SESSION_PERIOD as u64;
+    /// Im-online heartbeat unsigned-tx priority.
+    pub ImOnlineUnsignedPriority: TransactionPriority = TransactionPriority::MAX / 2;
+    /// Floor for the PoW difficulty work factor (and genesis seed).
+    pub MinDifficulty: U256 = U256::from(1_000_000u64);
+}
+
+/// Converts an account id to its validator id (identity on Ghost —
+/// validator ids are account ids).
+pub struct ValidatorIdOf;
+impl Convert<AccountId, Option<AccountId>> for ValidatorIdOf {
+    fn convert(a: AccountId) -> Option<AccountId> {
+        Some(a)
+    }
+}
+
+/// The offence identification stored in the historical session trie: the
+/// validator's bonded stake at session time (used to compute slash amounts).
+pub struct FullIdentificationOf;
+impl Convert<AccountId, Option<Balance>> for FullIdentificationOf {
+    fn convert(a: AccountId) -> Option<Balance> {
+        let bonded = GhostConsensus::bonded(&a);
+        (!bonded.is_zero()).then_some(bonded)
+    }
+}
+
+/// `validate` gating: a candidate must have session keys queued via
+/// `pallet_session::set_keys`.
+pub struct SessionKeysLookup;
+impl pallet_ghost_consensus::SessionKeysLookup<AccountId> for SessionKeysLookup {
+    fn keys_registered(who: &AccountId) -> bool {
+        pallet_session::NextKeys::<Runtime>::contains_key(who)
+    }
+}
+
+impl pallet_session::Config for Runtime {
+    type RuntimeEvent = RuntimeEvent;
+    type ValidatorId = AccountId;
+    type ValidatorIdOf = ValidatorIdOf;
+    type ShouldEndSession = pallet_session::PeriodicSessions<Period, Offset>;
+    type NextSessionRotation = pallet_session::PeriodicSessions<Period, Offset>;
+    /// Validator selection comes from Ghost consensus stake; the wrapper
+    /// also stores historical session tries for equivocation proofs.
+    type SessionManager = pallet_session::historical::NoteHistoricalRoot<Runtime, GhostConsensus>;
+    type SessionHandler = <SessionKeys as OpaqueKeys>::KeyTypeIdProviders;
+    type Keys = SessionKeys;
+    type WeightInfo = pallet_session::weights::SubstrateWeight<Runtime>;
+}
+
+impl pallet_session::historical::Config for Runtime {
+    type FullIdentification = Balance;
+    type FullIdentificationOf = FullIdentificationOf;
+}
+
+impl pallet_authorship::Config for Runtime {
+    /// PoW authors are decoded from the pow_ digest by pallet-ghost-consensus;
+    /// there is no session-indexed author map.
+    type FindAuthor = ();
+    /// im-online counts authored blocks for its liveness tracking.
+    type EventHandler = ImOnline;
+}
+
+impl pallet_offences::Config for Runtime {
+    type RuntimeEvent = RuntimeEvent;
+    type IdentificationTuple = pallet_session::historical::IdentificationTuple<Self>;
+    /// Slashing lands in the Ghost consensus pallet's OnOffenceHandler.
+    type OnOffenceHandler = GhostConsensus;
+}
+
+impl pallet_im_online::Config for Runtime {
+    type AuthorityId = ImOnlineId;
+    type RuntimeEvent = RuntimeEvent;
+    type ValidatorSet = Historical;
+    type NextSessionRotation = pallet_session::PeriodicSessions<Period, Offset>;
+    type ReportUnresponsiveness = Offences;
+    type UnsignedPriority = ImOnlineUnsignedPriority;
+    type WeightInfo = pallet_im_online::weights::SubstrateWeight<Runtime>;
+    type MaxKeys = ConstU32<10_000>;
+    type MaxPeerInHeartbeats = ConstU32<1_000>;
+}
+
+impl frame_system::offchain::SigningTypes for Runtime {
+    type Public = <Signature as sp_runtime::traits::Verify>::Signer;
+    type Signature = Signature;
+}
+
+impl<C> frame_system::offchain::SendTransactionTypes<C> for Runtime
+where
+    RuntimeCall: From<C>,
+{
+    type Extrinsic = super::UncheckedExtrinsic;
+    type OverarchingCall = RuntimeCall;
 }
 
 impl pallet_grandpa::Config for Runtime {
     type RuntimeEvent = RuntimeEvent;
 
     type WeightInfo = ();
-    type MaxAuthorities = ConstU32<32>;
+    type MaxAuthorities = ConstU32<100>;
     type MaxNominators = ConstU32<0>;
-    type MaxSetIdSessionEntries = ConstU64<0>;
+    /// One entry per session; keep enough for the report-longevity window.
+    type MaxSetIdSessionEntries = ConstU64<20>;
 
-    type KeyOwnerProof = sp_core::Void;
-    type EquivocationReportSystem = ();
+    type KeyOwnerProof = <Historical as KeyOwnerProofSystem<(KeyTypeId, GrandpaId)>>::Proof;
+    type EquivocationReportSystem =
+        pallet_grandpa::EquivocationReportSystem<Self, Offences, Historical, ReportLongevity>;
 }
 
 impl pallet_timestamp::Config for Runtime {
     /// A timestamp: milliseconds since the unix epoch.
     type Moment = u64;
-    type OnTimestampSet = Aura;
+    /// No slot consensus owns timestamp notes; PoW clients set timestamps.
+    type OnTimestampSet = ();
     type MinimumPeriod = ConstU64<{ SLOT_DURATION / 2 }>;
     type WeightInfo = ();
 }
@@ -169,16 +274,27 @@ impl pallet_template::Config for Runtime {
     type WeightInfo = pallet_template::weights::SubstrateWeight<Runtime>;
 }
 
-/// Configure the Ghost Consensus pallet
+/// Configure the Ghost Consensus pallet (v2): staking holds, session
+/// selection, difficulty retarget, digest-decoded rewards, offence slashing.
 impl pallet_ghost_consensus::Config for Runtime {
     type RuntimeEvent = RuntimeEvent;
+    type Currency = Balances;
+    type RuntimeHoldReason = RuntimeHoldReason;
     type WeightInfo = ();
-    type BlockReward = ConstU128<10_000_000_000_000>; // 10 Ghost tokens per block
-    type MinStake = ConstU128<1_000_000_000_000>; // 1 Ghost token minimum stake
-    type MaxDowntimeBlocks = ConstU32<100>; // Max 100 blocks of downtime
-    type DoubleSignSlashPercentage = ConstU8<100>; // 100% slash for double signing
-    type InvalidBlockSlashPercentage = ConstU8<50>; // 50% slash for invalid blocks
-    type DowntimeSlashPercentage = ConstU8<10>; // 10% slash for downtime
     type PalletId = GhostPalletId;
-    type PqcRequired = ConstBool<false>;
+    type BlockReward = ConstU128<{ 10 * UNIT }>;
+    type MinStake = ConstU128<UNIT>;
+    type MaxStake = ConstU128<{ 1_000_000 * UNIT }>;
+    type MaxValidators = ConstU32<100>;
+    type MaxValidatorCandidates = ConstU32<1024>;
+    type UnbondingPeriod = ConstU32<{ 14 * DAYS }>;
+    type MaxUnbondingChunks = ConstU32<16>;
+    type RetargetInterval = ConstU32<100>;
+    type TargetBlockTimeMs = ConstU64<SLOT_DURATION>;
+    type MinDifficulty = MinDifficulty;
+    type SessionKeysLookup = SessionKeysLookup;
+    /// () until pallet-ghost-pqc lands; RequirePqcKey stays false until then
+    /// (no_std PQC verification per AGENTS.md).
+    type PqcProvider = ();
+    type RequirePqcKey = ConstBool<false>;
 }

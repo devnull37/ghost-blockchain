@@ -15,13 +15,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{AccountId, BalancesConfig, Runtime, SudoConfig};
+use crate::{
+    AccountId, Balance, BalancesConfig, GhostConsensusConfig, ImOnlineConfig, Runtime,
+    SessionConfig, SessionKeys, SudoConfig, UNIT,
+};
 use alloc::{vec, vec::Vec};
+use pallet_grandpa::AuthorityId as GrandpaId;
+use pallet_im_online::sr25519::AuthorityId as ImOnlineId;
 use serde_json::Value;
-use sp_consensus_aura::sr25519::AuthorityId as AuraId;
-use sp_consensus_grandpa::AuthorityId as GrandpaId;
-use sp_core::{crypto::AccountId32, ed25519, sr25519};
+use sp_core::{crypto::AccountId32, ed25519, sr25519, U256};
 use sp_genesis_builder::{self, PresetId};
+
+/// Genesis PoW difficulty work factor (also the retarget floor; matches
+/// `configs::MinDifficulty`).
+const INITIAL_DIFFICULTY: u64 = 1_000_000;
+
+/// Genesis bond for initial validators (dev/local presets).
+const GENESIS_VALIDATOR_STAKE: Balance = 1_000 * UNIT;
 
 const ALICE_SR25519: [u8; 32] =
     hex_literal::hex!("d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d");
@@ -48,17 +58,17 @@ fn account(public: [u8; 32]) -> AccountId {
     AccountId32::from(public).into()
 }
 
-fn aura(public: [u8; 32]) -> AuraId {
-    sr25519::Public::from_raw(public).into()
-}
-
 fn grandpa(public: [u8; 32]) -> GrandpaId {
     ed25519::Public::from_raw(public).into()
 }
 
+fn im_online(public: [u8; 32]) -> ImOnlineId {
+    sr25519::Public::from_raw(public).into()
+}
+
 // Returns the genesis config presets populated with given parameters.
 fn testnet_genesis(
-    initial_authorities: Vec<(AuraId, GrandpaId)>,
+    initial_authorities: Vec<(AccountId, GrandpaId, ImOnlineId)>,
     endowed_accounts: Vec<AccountId>,
     root: AccountId,
 ) -> Value {
@@ -70,12 +80,45 @@ fn testnet_genesis(
                 .map(|k| (k, 1u128 << 60))
                 .collect::<Vec<_>>(),
         },
-        "aura": pallet_aura::GenesisConfig::<Runtime> {
-            authorities: initial_authorities.iter().map(|x| x.0.clone()).collect::<Vec<_>>(),
-        },
         "grandpa": pallet_grandpa::GenesisConfig::<Runtime> {
             authorities: initial_authorities.iter().map(|x| (x.1.clone(), 1)).collect::<Vec<_>>(),
             _config: Default::default(),
+        },
+        // ValidatorId == AccountId on Ghost; each authority registers its
+        // GRANDPA + im-online session keys.
+        "session": SessionConfig {
+            keys: initial_authorities
+                .iter()
+                .map(|x| {
+                    (
+                        x.0.clone(),
+                        x.0.clone(),
+                        SessionKeys {
+                            grandpa: x.1.clone(),
+                            im_online: x.2.clone(),
+                        },
+                    )
+                })
+                .collect::<Vec<_>>(),
+        },
+        "imOnline": ImOnlineConfig {
+            keys: initial_authorities
+                .iter()
+                .map(|x| x.2.clone())
+                .collect::<Vec<_>>(),
+        },
+        // Genesis stakes make the authorities candidate validators before the
+        // first session rotation.
+        "ghostConsensus": GhostConsensusConfig {
+            difficulty: U256::from(INITIAL_DIFFICULTY),
+            stakers: initial_authorities
+                .iter()
+                .map(|x| (x.0.clone(), GENESIS_VALIDATOR_STAKE))
+                .collect::<Vec<_>>(),
+            initial_validators: initial_authorities
+                .iter()
+                .map(|x| x.0.clone())
+                .collect::<Vec<_>>(),
         },
         "sudo": SudoConfig { key: Some(root) },
     })
@@ -84,7 +127,11 @@ fn testnet_genesis(
 /// Return the development genesis config.
 pub fn development_config_genesis() -> Value {
     testnet_genesis(
-        vec![(aura(ALICE_SR25519), grandpa(ALICE_ED25519))],
+        vec![(
+            account(ALICE_SR25519),
+            grandpa(ALICE_ED25519),
+            im_online(ALICE_SR25519),
+        )],
         vec![
             account(ALICE_SR25519),
             account(BOB_SR25519),
@@ -99,8 +146,16 @@ pub fn development_config_genesis() -> Value {
 pub fn local_config_genesis() -> Value {
     testnet_genesis(
         vec![
-            (aura(ALICE_SR25519), grandpa(ALICE_ED25519)),
-            (aura(BOB_SR25519), grandpa(BOB_ED25519)),
+            (
+                account(ALICE_SR25519),
+                grandpa(ALICE_ED25519),
+                im_online(ALICE_SR25519),
+            ),
+            (
+                account(BOB_SR25519),
+                grandpa(BOB_ED25519),
+                im_online(BOB_SR25519),
+            ),
         ],
         vec![
             account(ALICE_SR25519),
