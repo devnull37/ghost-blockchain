@@ -36,7 +36,7 @@ Mark each item green before calling the chain testnet-ready:
 - [x] `pallet-ghost-pqc` is composed into the runtime and PQC verification works in the no_std/Wasm path. ML-DSA-87 verifies in the Wasm build; `validate()` and session selection both consult the registry.
 - [x] Two or more Aura/GRANDPA nodes can form a network, author blocks, finalize, and survive a validator restart. *(Historical — superseded by the Ghost gate.)*
 - [x] Two or more Ghost-consensus nodes can form a network, author blocks, finalize, and survive a restart — `e2e-ghost.sh` steps 3-6.
-- [ ] The launch checklist is reproducible by someone who did not help build the branch.
+- [ ] The launch checklist is reproducible by someone who did not help build the branch. *(CI's `e2e`/`e2e-faults` jobs run the same scripts on a clean runner — that is the cold-run evidence; a human cold-run remains open.)*
 
 ## Minimum Launch Gate
 
@@ -52,7 +52,16 @@ Do not schedule a public testnet until all of the following are true:
 5. `rtk scripts/e2e-ghost.sh` (the two-node Ghost-consensus gate) passes from a clean checkout.
 6. `scripts/e2e-faults.sh` (adversarial gate) passes: miner halt/resume,
    validator offline/rejoin, and GRANDPA equivocation → slash + removal.
-   *(Script merged; full pass pending.)*
+7. `scripts/e2e-forged-seal.sh` passes: honest nodes deterministically
+   reject blocks sealed with a corrupted `pre_hash` from a patched node.
+8. `scripts/e2e-upgrade.sh` passes: a Wasm→Wasm `sudo set_code` upgrade
+   lands on a live chain and finality continues on the new spec_version.
+9. `scripts/soak-ghost.sh` completes a ≥30-min multi-node soak with no
+   invariant violations (finality advance, bounded head spread, ≥1 peer,
+   no finalized forks) — see `docs/soak-report.md`.
+10. Genesis machinery exists for a real allocation:
+    `scripts/genesis-generate.sh` + ceremony checklist
+    (`docs/genesis-ceremony.md`).
 
 ## Runbook
 
