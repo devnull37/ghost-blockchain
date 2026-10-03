@@ -26,8 +26,20 @@ mod mock;
 #[cfg(test)]
 mod tests;
 
-mod weights;
-pub use weights::WeightInfo;
+#[cfg(feature = "runtime-benchmarks")]
+mod benchmarking;
+
+pub mod weights;
+
+use frame_support::weights::Weight;
+
+/// Weight functions needed for `pallet-ghost-pqc`.
+pub trait WeightInfo {
+    fn register_pqc_key() -> Weight;
+    fn revoke_pqc_key() -> Weight;
+    fn pqc_attest() -> Weight;
+    fn set_pqc_required() -> Weight;
+}
 
 use codec::Encode;
 use frame_support::{pallet_prelude::ConstU32, BoundedVec};

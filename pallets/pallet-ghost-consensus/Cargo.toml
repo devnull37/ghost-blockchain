@@ -39,6 +39,12 @@ ghost-pow-primitives = { path = "../../primitives/ghost-pow", default-features =
 [dev-dependencies]
 sp-io = { workspace = true, default-features = true }
 sp-runtime = { workspace = true, default-features = true }
+# Native benchmark-measurement harness (`mod measure` in `benchmarking.rs`):
+# TrackingBackend runs the real generated `run_benchmark` with DB-access and
+# PoV tracking that `InMemoryBackend` leaves unimplemented.
+sp-state-machine = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407" }
+sp-externalities = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407" }
+sp-trie = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407" }
 
 [features]
 default = ["std"]

@@ -153,6 +153,25 @@ impl pallet_ghost_consensus::SessionKeysLookup<AccountId> for SessionKeysLookup 
     }
 }
 
+/// Benchmark helper for `pallet-ghost-consensus`: `validate` requires
+/// `SessionKeysLookup::keys_registered(who)`, which the real extrinsic
+/// satisfies via `pallet_session::set_keys`. The benchmark pre-seeds
+/// `NextKeys` with an all-zeroes decode (the same trick
+/// `pallet-session`'s own benchmarks use — `SessionKeys::generate` needs a
+/// keystore that doesn't exist under externalities).
+#[cfg(feature = "runtime-benchmarks")]
+pub struct GhostBenchmarkHelper;
+#[cfg(feature = "runtime-benchmarks")]
+impl pallet_ghost_consensus::BenchmarkHelper<Runtime> for GhostBenchmarkHelper {
+    fn prepare_validate(who: &AccountId) {
+        let keys = <SessionKeys as codec::Decode>::decode(
+            &mut sp_runtime::traits::TrailingZeroInput::new(&[]),
+        )
+        .expect("zeroed SessionKeys always decode");
+        pallet_session::NextKeys::<Runtime>::insert(who, keys);
+    }
+}
+
 impl pallet_session::Config for Runtime {
     type RuntimeEvent = RuntimeEvent;
     type ValidatorId = AccountId;
@@ -285,7 +304,9 @@ impl pallet_ghost_consensus::Config for Runtime {
     type RuntimeEvent = RuntimeEvent;
     type Currency = Balances;
     type RuntimeHoldReason = RuntimeHoldReason;
-    type WeightInfo = ();
+    type WeightInfo = pallet_ghost_consensus::weights::SubstrateWeight<Runtime>;
+    #[cfg(feature = "runtime-benchmarks")]
+    type BenchmarkHelper = GhostBenchmarkHelper;
     type PalletId = GhostPalletId;
     type BlockReward = ConstU128<{ 10 * UNIT }>;
     type MinStake = ConstU128<UNIT>;
