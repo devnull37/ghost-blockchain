@@ -4,6 +4,7 @@ members = [
     "node",
     "runtime",
     "pallets/*",
+    "primitives/*",
 ]
 
 [workspace.package]
@@ -116,4 +117,7 @@ proptest = { version = "1.5", default-features = false, features = ["std", "allo
 # Local dependencies
 pallet-template = { path = "pallets/template", default-features = false }
 pallet-ghost-consensus = { path = "pallets/pallet-ghost-consensus" }
+pallet-ghost-pqc = { path = "pallets/pallet-ghost-pqc" }
+ghost-pow-primitives = { path = "primitives/ghost-pow", default-features = false }
+ghost-consensus = { path = "consensus/ghost-consensus" }
 solochain-template-runtime = { path = "runtime" }
