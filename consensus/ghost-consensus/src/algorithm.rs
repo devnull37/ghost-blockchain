@@ -8,7 +8,7 @@ use std::{
 
 use codec::DecodeAll;
 use sc_client_api::backend::AuxStore;
-use sc_consensus_pow::{Error, PowAlgorithm, PowAux};
+use sc_consensus_pow::{Error, PowAlgorithm};
 use sp_api::ProvideRuntimeApi;
 use sp_consensus_pow::Seal;
 use sp_core::{crypto::AccountId32, U256};
@@ -41,11 +41,15 @@ type DifficultyMemo<B> = Arc<Mutex<Option<(<B as BlockT>::Hash, U256)>>>;
 ///   rejected (§5: attribution must be unspoofable).
 /// * `preliminary_verify` stays `Ok(None)` — full verification needs the
 ///   difficulty derived from parent state, which a stateless pre-check lacks.
-/// * `break_tie` keeps the default `false` (earliest-seen wins) per the doc.
+/// * `break_tie` resolves equal-total-difficulty races on the seals' embedded
+///   `pre_hash` (lowest wins) — identical to `HeaviestChain`'s leaf ordering,
+///   so the import-time and selection-time fork choices cannot diverge on
+///   ties (earliest-seen would let arrival order split the network).
 pub struct GhostPowAlgorithm<B: BlockT, C> {
     client: Arc<C>,
-    /// Difficulty used when neither the runtime API nor aux storage can supply
-    /// one (genesis parent on cold start).
+    /// Genesis-configured difficulty, kept for call-site documentation and
+    /// future cold-start paths — `difficulty()` itself always defers to the
+    /// runtime API and rejects when it is unreachable.
     initial_difficulty: U256,
     /// One-entry memo for `difficulty()` — the import path calls it twice per
     /// block against the same parent (design doc §3).
@@ -98,7 +102,33 @@ pub fn verify_seal(
         Ok(seal) => seal,
         Err(_) => return false,
     };
+    // The embedded pre-hash must match the real one — it exists so fork
+    // choice can trust it for tie-breaking (see `GhostSeal::pre_hash`).
+    if seal.pre_hash[..] != *pre_hash {
+        return false;
+    }
     pow_meets(pow_value(pre_hash, pre_digest, &seal), difficulty)
+}
+
+/// Extract the tie-break `pre_hash` from raw seal bytes, if they decode.
+/// `HeaviestChain` uses this so its ordering matches `break_tie` exactly.
+pub fn seal_pre_hash(seal_bytes: &[u8]) -> Option<[u8; 32]> {
+    GhostSeal::decode_all(&mut &seal_bytes[..])
+        .ok()
+        .map(|seal| seal.pre_hash)
+}
+
+/// Equal-total-difficulty tie-break: does `new_seal` beat `own_seal`? The
+/// seal carrying the smaller embedded `pre_hash` wins; a seal that does not
+/// decode never wins. `HeaviestChain` applies the identical ordering to its
+/// leaves, so the import-time and selection-time fork choices cannot
+/// diverge on ties (earliest-seen would let arrival order split the
+/// network).
+pub fn seal_beats(own_seal: &[u8], new_seal: &[u8]) -> bool {
+    match (seal_pre_hash(own_seal), seal_pre_hash(new_seal)) {
+        (Some(own), Some(new)) => new < own,
+        _ => false,
+    }
 }
 
 /// Decode the miner account from the `PreRuntime(POW_ENGINE_ID, _)` digest in
@@ -131,22 +161,21 @@ where
             }
         }
 
-        // The runtime is the source of truth: its `on_initialize` retarget
-        // adjusts `Difficulty` every RETARGET_INTERVAL blocks.
-        let difficulty = match self.client.runtime_api().next_difficulty(parent) {
-            Ok(difficulty) => difficulty,
-            Err(_) => {
-                // Fall back to the per-block difficulty recorded in aux for the
-                // parent (design doc §3). Zero means no aux was recorded —
-                // genesis/cold start — so use the configured initial value.
-                let aux = PowAux::<U256>::read::<_, B>(self.client.as_ref(), &parent)?;
-                if aux.difficulty.is_zero() {
-                    self.initial_difficulty
-                } else {
-                    aux.difficulty
-                }
-            }
-        };
+        // The runtime is the ONLY source of truth: its `on_finalize` retarget
+        // adjusts `Difficulty` every RETARGET_INTERVAL blocks. On API failure
+        // we REJECT rather than fall back to the parent's aux value — after a
+        // retarget boundary the parent value may be up to 4x off, so silently
+        // accepting it would let seals pass at a stale difficulty (and split
+        // verifiers on transient executor errors).
+        let difficulty = self
+            .client
+            .runtime_api()
+            .next_difficulty(parent)
+            .map_err(|e| {
+                Error::<B>::Environment(format!(
+                    "GhostPowApi::next_difficulty({parent:?}) failed: {e}"
+                ))
+            })?;
 
         let mut memo = self.memo.lock().unwrap_or_else(|e| e.into_inner());
         *memo = Some((parent, difficulty));
@@ -161,6 +190,10 @@ where
         // Design doc §3: full verification needs parent context; no stateless
         // pre-check is offered.
         Ok(None)
+    }
+
+    fn break_tie(&self, own_seal: &Seal, new_seal: &Seal) -> bool {
+        seal_beats(own_seal, new_seal)
     }
 
     fn verify(
@@ -187,7 +220,10 @@ mod tests {
         let author = AccountId32::new([7u8; 32]);
         let pre_digest = miner_pre_runtime(&author);
         let pre_hash = [3u8; 32];
-        let seal = GhostSeal { nonce: 42 };
+        let seal = GhostSeal {
+            nonce: 42,
+            pre_hash,
+        };
         let seal_bytes = seal.encode();
 
         // Work factor 1: always meets. Work factor 0: never meets.
@@ -227,7 +263,7 @@ mod tests {
     fn verify_seal_rejects_malformed_inputs() {
         let pre_digest = miner_pre_runtime(&AccountId32::new([7u8; 32]));
         let pre_hash = [3u8; 32];
-        let seal_bytes = GhostSeal { nonce: 1 }.encode();
+        let seal_bytes = GhostSeal { nonce: 1, pre_hash }.encode();
 
         // Missing pre-runtime digest: no miner attribution possible.
         assert!(!verify_seal(&pre_hash, None, &seal_bytes, U256::one()));
@@ -251,12 +287,48 @@ mod tests {
             &[&seal_bytes[..], &[0u8]].concat(),
             U256::one()
         ));
+        // A seal embedded with a foreign pre_hash is rejected even though the
+        // hash input would otherwise commit it — fork choice must be able to
+        // trust the embedded value.
+        let foreign = GhostSeal {
+            nonce: 1,
+            pre_hash: [9u8; 32],
+        }
+        .encode();
+        assert!(!verify_seal(
+            &pre_hash,
+            Some(&pre_digest),
+            &foreign,
+            U256::one()
+        ));
     }
 
     #[test]
     fn pow_meets_boundary() {
         assert!(pow_meets(U256::one(), U256::MAX));
         assert!(!pow_meets(U256::from(2u64), U256::MAX));
+    }
+
+    #[test]
+    fn seal_beats_orders_by_embedded_pre_hash() {
+        let seal_a = GhostSeal {
+            nonce: 1,
+            pre_hash: [0x0au8; 32],
+        }
+        .encode();
+        let seal_b = GhostSeal {
+            nonce: 2,
+            pre_hash: [0x0bu8; 32],
+        }
+        .encode();
+        // Smaller embedded pre_hash wins; nonce is irrelevant.
+        assert!(seal_beats(&seal_b, &seal_a));
+        assert!(!seal_beats(&seal_a, &seal_b));
+        // Identical seal does not beat itself; undecodable never wins and
+        // never loses to a valid seal.
+        assert!(!seal_beats(&seal_a, &seal_a));
+        assert!(!seal_beats(&seal_a, &[0u8; 3]));
+        assert!(!seal_beats(&[0u8; 3], &seal_a));
     }
 
     #[test]

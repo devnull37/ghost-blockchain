@@ -39,6 +39,14 @@ pub const POW_ENGINE_ID: [u8; 4] = *b"pow_";
 pub struct GhostSeal {
     /// Counter the miner incremented until the PoW hash met the target.
     pub nonce: u64,
+    /// Pre-hash of the header this seal was mined for (the header hash with
+    /// the seal digest stripped). Embedded so fork choice can compare two
+    /// seals deterministically (`break_tie` receives only seal bytes): on an
+    /// equal-total-difficulty tie, the smaller `pre_hash` wins — the same
+    /// ordering `HeaviestChain` applies, so import-time and selection-time
+    /// fork choice cannot diverge. Verified against the real pre-hash on
+    /// import, so it cannot be forged to steal a tie.
+    pub pre_hash: [u8; 32],
 }
 
 sp_api::decl_runtime_apis! {

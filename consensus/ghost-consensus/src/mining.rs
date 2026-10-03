@@ -24,7 +24,7 @@ use ghost_pow_primitives::{GhostSeal, POW_ENGINE_ID};
 /// `pre_digest` is the raw payload of `DigestItem::PreRuntime(POW_ENGINE_ID, _)`
 /// (the SCALE-encoded miner account), not the `DigestItem` itself.
 pub fn pow_value(pre_hash: &[u8], pre_digest: &[u8], seal: &GhostSeal) -> U256 {
-    let mut input = Vec::with_capacity(pre_hash.len() + pre_digest.len() + 8);
+    let mut input = Vec::with_capacity(pre_hash.len() + pre_digest.len() + 40);
     input.extend_from_slice(pre_hash);
     input.extend_from_slice(pre_digest);
     input.extend_from_slice(&seal.encode());
@@ -48,14 +48,18 @@ pub fn pow_meets(value: U256, difficulty: U256) -> bool {
 }
 
 /// Try a single nonce. Returns the constructed [`GhostSeal`] iff the PoW hash
-/// meets `difficulty` under [`pow_meets`].
+/// meets `difficulty` under [`pow_meets`]. `pre_hash` must be exactly 32 bytes
+/// — it is embedded into the seal so fork choice can tie-break on it.
 pub fn hash_meets(
     pre_hash: &[u8],
     pre_digest: &[u8],
     nonce: u64,
     difficulty: U256,
 ) -> Option<GhostSeal> {
-    let seal = GhostSeal { nonce };
+    let seal = GhostSeal {
+        nonce,
+        pre_hash: pre_hash.try_into().ok()?,
+    };
     pow_meets(pow_value(pre_hash, pre_digest, &seal), difficulty).then_some(seal)
 }
 
@@ -117,10 +121,13 @@ mod tests {
     fn seal_roundtrip() {
         let seal = GhostSeal {
             nonce: 0xdead_beef_cafe_f00d,
+            pre_hash: [0xabu8; 32],
         };
         assert_eq!(GhostSeal::decode(&mut &seal.encode()[..]).unwrap(), seal);
-        // Seal encoding is exactly the u64 nonce (8 bytes LE) — the wire format.
-        assert_eq!(seal.encode(), 0xdead_beef_cafe_f00du64.to_le_bytes());
+        // Wire format: u64 nonce (8 bytes LE) ++ 32-byte pre_hash.
+        let mut expected = 0xdead_beef_cafe_f00du64.to_le_bytes().to_vec();
+        expected.extend_from_slice(&[0xabu8; 32]);
+        assert_eq!(seal.encode(), expected);
     }
 
     #[test]
@@ -163,21 +170,22 @@ mod tests {
         let pre_digest = miner_pre_runtime(&author);
         let pre_hash = [1u8; 32];
 
+        let seal0 = GhostSeal { nonce: 0, pre_hash };
         // Work factor 1: every nonce meets.
         assert_eq!(
             hash_meets(&pre_hash, &pre_digest, 0, U256::one()),
-            Some(GhostSeal { nonce: 0 })
+            Some(seal0)
         );
         // Work factor 0: nothing meets.
         assert_eq!(hash_meets(&pre_hash, &pre_digest, 0, U256::zero()), None);
+        // Non-32-byte pre_hash: no seal can be constructed.
+        assert_eq!(hash_meets(&[1u8; 8], &pre_digest, 0, U256::one()), None);
         // Exact boundary, both directions.
-        let value = pow_value(&pre_hash, &pre_digest, &GhostSeal { nonce: 7 });
+        let seal7 = GhostSeal { nonce: 7, pre_hash };
+        let value = pow_value(&pre_hash, &pre_digest, &seal7);
         if !value.is_zero() {
             let exact = U256::MAX / value;
-            assert_eq!(
-                hash_meets(&pre_hash, &pre_digest, 7, exact),
-                Some(GhostSeal { nonce: 7 })
-            );
+            assert_eq!(hash_meets(&pre_hash, &pre_digest, 7, exact), Some(seal7));
             assert_eq!(hash_meets(&pre_hash, &pre_digest, 7, exact + 1), None);
         }
     }
@@ -191,7 +199,15 @@ mod tests {
             difficulty: U256::one(),
         };
         // Work factor 1: first nonce wins.
-        assert_eq!(grind(&metadata, 0, 1, 8), Some(GhostSeal { nonce: 0 }));
+        let seal0 = GhostSeal {
+            nonce: 0,
+            pre_hash: [2u8; 32],
+        };
+        let seal1 = GhostSeal {
+            nonce: 1,
+            pre_hash: [2u8; 32],
+        };
+        assert_eq!(grind(&metadata, 0, 1, 8), Some(seal0));
         // Work factor 0: rounds are bounded and nothing is found.
         let mut impossible = metadata.clone();
         impossible.difficulty = U256::zero();
@@ -201,7 +217,7 @@ mod tests {
         no_miner.pre_runtime = None;
         assert_eq!(grind(&no_miner, 0, 1, 1024), None);
         // Strides partition the nonce space deterministically.
-        assert_eq!(grind(&metadata, 1, 4, 4), Some(GhostSeal { nonce: 1 }));
+        assert_eq!(grind(&metadata, 1, 4, 4), Some(seal1));
     }
 
     proptest! {
@@ -217,7 +233,10 @@ mod tests {
             // contract both paths are supposed to implement.
             let pre_digest = miner_pre_runtime(&AccountId32::new(author));
             let difficulty = U256::from_big_endian(&diff_be);
-            let seal = GhostSeal { nonce };
+            let seal = GhostSeal {
+                nonce,
+                pre_hash,
+            };
             let expected = pow_meets(pow_value(&pre_hash, &pre_digest, &seal), difficulty);
             prop_assert_eq!(
                 verify_seal(&pre_hash, Some(&pre_digest), &seal.encode(), difficulty),
@@ -233,7 +252,10 @@ mod tests {
             d1 in any::<[u8; 32]>(),
             d2 in any::<[u8; 32]>(),
         ) {
-            let seal = GhostSeal { nonce };
+            let seal = GhostSeal {
+                nonce,
+                pre_hash: [0u8; 32],
+            };
             let v1 = pow_value(&pre_hash, &pre_digest, &seal);
             let v2 = pow_value(&pre_hash, &pre_digest, &seal);
             prop_assert_eq!(v1, v2, "hash must be deterministic");

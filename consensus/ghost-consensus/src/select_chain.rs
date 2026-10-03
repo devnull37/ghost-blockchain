@@ -1,14 +1,19 @@
 //! `HeaviestChain`: `SelectChain` that follows cumulative PoW work.
 //!
 //! `docs/ghost-consensus-design.md` §9: among the chain's leaves pick the one
-//! with the greatest `PowAux.total_difficulty`; tie-break on the higher block
-//! number, then the lower header hash. `LongestChain` is wrong here — it
-//! selects by block number while `PowBlockImport` decides the client's best
-//! by `ForkChoiceStrategy::Custom(total_difficulty)`. The same instance feeds
+//! with the greatest `PowAux.total_difficulty`; on a tie, the leaf whose seal
+//! embeds the smaller `pre_hash` wins — the exact ordering
+//! `GhostPowAlgorithm::break_tie` applies inside `PowBlockImport`, so the
+//! import-time and selection-time fork choices cannot diverge. Block number
+//! is NOT part of the ordering: `break_tie` sees only seal bytes, so any
+//! rule it cannot reproduce would split the network on ties.
+//! `LongestChain` is wrong here — it selects by block number while
+//! `PowBlockImport` decides the client's best by
+//! `ForkChoiceStrategy::Custom(total_difficulty)`. The same instance feeds
 //! the GRANDPA voter so finality tracks the heaviest chain.
 //!
-//! The ordering and ancestor-walk logic mirror `sc_consensus::LongestChain`,
-//! with leaf selection by total difficulty instead of block number.
+//! The ancestor-walk logic mirrors `sc_consensus::LongestChain`, with leaf
+//! selection by total difficulty instead of block number.
 
 use std::{marker::PhantomData, sync::Arc};
 
@@ -17,15 +22,17 @@ use sc_consensus_pow::PowAux;
 use sp_blockchain::{Backend as _, Error as ClientError, HeaderBackend};
 use sp_consensus::{Error as ConsensusError, SelectChain};
 use sp_core::U256;
-use sp_runtime::traits::{Block as BlockT, Header as HeaderT, NumberFor};
+use sp_runtime::{
+    traits::{Block as BlockT, Header as HeaderT, NumberFor},
+    DigestItem,
+};
+
+use ghost_pow_primitives::POW_ENGINE_ID;
+
+use crate::algorithm::seal_pre_hash;
 
 /// The running best leaf while scanning `leaves()`.
-type BestLeaf<Block> = (
-    U256,
-    NumberFor<Block>,
-    <Block as BlockT>::Hash,
-    <Block as BlockT>::Header,
-);
+type BestLeaf<Block> = (U256, [u8; 32], <Block as BlockT>::Header);
 
 /// A `SelectChain` that picks the leaf with the most accumulated work.
 pub struct HeaviestChain<B, Block> {
@@ -43,24 +50,29 @@ impl<B, Block> Clone for HeaviestChain<B, Block> {
 }
 
 /// `candidate` strictly outranks `incumbent` under the Ghost fork-choice
-/// order: more total work, else higher number, else lower hash.
+/// order: more total work, else the smaller seal `pre_hash` — identical to
+/// `GhostPowAlgorithm::break_tie`.
 ///
 /// Extracted as a pure function so the ordering is directly testable.
-fn leaf_beats<Number, Hash>(
-    candidate: (U256, &Number, &Hash),
-    incumbent: (U256, &Number, &Hash),
-) -> bool
-where
-    Number: Ord,
-    Hash: AsRef<[u8]>,
-{
-    let (cand_total, cand_number, cand_hash) = candidate;
-    let (best_total, best_number, best_hash) = incumbent;
-    cand_total > best_total
-        || (cand_total == best_total && cand_number > best_number)
-        || (cand_total == best_total
-            && cand_number == best_number
-            && cand_hash.as_ref() < best_hash.as_ref())
+fn leaf_beats(candidate: (U256, &[u8; 32]), incumbent: (U256, &[u8; 32])) -> bool {
+    let (cand_total, cand_pre_hash) = candidate;
+    let (best_total, best_pre_hash) = incumbent;
+    cand_total > best_total || (cand_total == best_total && cand_pre_hash < best_pre_hash)
+}
+
+/// Tie-break key for a leaf header: the `pre_hash` embedded in its PoW seal,
+/// or `[0xff; 32]` (loses every tie) when the header carries no decodable
+/// Ghost seal — e.g. genesis.
+fn seal_tie_hash<Header: HeaderT>(header: &Header) -> [u8; 32] {
+    header
+        .digest()
+        .logs()
+        .iter()
+        .find_map(|log| match log {
+            DigestItem::Seal(id, bytes) if id == &POW_ENGINE_ID => seal_pre_hash(bytes),
+            _ => None,
+        })
+        .unwrap_or([0xff; 32])
 }
 
 impl<B, Block> HeaviestChain<B, Block>
@@ -81,7 +93,7 @@ where
     }
 
     /// Total work recorded for `hash`; zero when no aux exists (e.g. genesis),
-    /// which degrades selection to the number/hash tie-breaks.
+    /// which degrades selection to the seal `pre_hash` tie-break.
     fn total_difficulty(&self, hash: &Block::Hash) -> Result<U256, ClientError> {
         PowAux::<U256>::read::<_, Block>(self.backend.as_ref(), hash)
             .map(|aux| aux.total_difficulty)
@@ -96,19 +108,18 @@ where
                 .header(hash)?
                 .ok_or_else(|| ClientError::MissingHeader(hash.to_string()))?;
             let total = self.total_difficulty(&hash)?;
-            let number = *header.number();
+            let tie_hash = seal_tie_hash(&header);
             let wins = match &best {
                 None => true,
-                Some((best_total, best_number, best_hash, _)) => leaf_beats(
-                    (total, &number, &hash),
-                    (*best_total, best_number, best_hash),
-                ),
+                Some((best_total, best_pre_hash, _)) => {
+                    leaf_beats((total, &tie_hash), (*best_total, best_pre_hash))
+                }
             };
             if wins {
-                best = Some((total, number, hash, header));
+                best = Some((total, tie_hash, header));
             }
         }
-        best.map(|(_, _, _, header)| header)
+        best.map(|(_, _, header)| header)
             .ok_or_else(|| ClientError::Backend("no leaves in the chain".into()))
     }
 
@@ -198,39 +209,32 @@ mod tests {
     fn leaf_ordering() {
         let h1 = [1u8; 32];
         let h2 = [2u8; 32];
-        let n1 = 10u32;
-        let n2 = 11u32;
 
-        // More total work always wins, regardless of number/hash.
+        // More total work always wins, regardless of the tie-break key.
         assert!(leaf_beats(
-            (U256::from(100u64), &n1, &h2),
-            (U256::from(99u64), &n2, &h1),
+            (U256::from(100u64), &h2),
+            (U256::from(99u64), &h1),
         ));
         assert!(!leaf_beats(
-            (U256::from(99u64), &n2, &h1),
-            (U256::from(100u64), &n1, &h2),
+            (U256::from(99u64), &h1),
+            (U256::from(100u64), &h2),
         ));
 
-        // Equal work: higher number wins.
+        // Equal work: the smaller seal `pre_hash` wins — same rule as
+        // `GhostPowAlgorithm::break_tie`.
         assert!(leaf_beats(
-            (U256::from(50u64), &n2, &h2),
-            (U256::from(50u64), &n1, &h1),
-        ));
-
-        // Equal work and number: lower hash wins.
-        assert!(leaf_beats(
-            (U256::from(50u64), &n1, &h1),
-            (U256::from(50u64), &n1, &h2),
+            (U256::from(50u64), &h1),
+            (U256::from(50u64), &h2)
         ));
         assert!(!leaf_beats(
-            (U256::from(50u64), &n1, &h2),
-            (U256::from(50u64), &n1, &h1),
+            (U256::from(50u64), &h2),
+            (U256::from(50u64), &h1)
         ));
 
         // Identical leaf does not beat itself.
         assert!(!leaf_beats(
-            (U256::from(50u64), &n1, &h1),
-            (U256::from(50u64), &n1, &h1),
+            (U256::from(50u64), &h1),
+            (U256::from(50u64), &h1)
         ));
     }
 }
