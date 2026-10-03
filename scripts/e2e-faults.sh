@@ -90,7 +90,7 @@ start_node() {
 		prev="$arg"
 	done
 	# shellcheck disable=SC2086 # NODE_MEM_ARGS is intentionally word-split
-	"$BIN" "$@" $NODE_MEM_ARGS --no-telemetry -l warn -l grandpa=info >"$log" 2>&1 &
+	"$BIN" "$@" $NODE_MEM_ARGS --no-telemetry -l warn -l grandpa=debug >"$log" 2>&1 &
 	LAST_PID=$!
 	LIVE_PIDS[$LAST_PID]=1
 }
@@ -189,6 +189,9 @@ echo "baseline: best=$(best_number "$A1_RPC") finalized=$(finalized_number "$A1_
 
 # Halt the ONLY miner. PoW best head freezes; finality must catch up to the
 # frozen head and stop — never advance past it (nothing new to finalize).
+# First ensure bob's import view has caught up with alice's head — freezing
+# while bob is mid-sync makes the catch-up measurement meaningless.
+wait_block_at_least "$BOB_RPC" "$(best_number "$A1_RPC")" "bob view" 120
 kill_node "$M1_PID"
 sleep 3
 frozen_best="$(best_number "$A1_RPC")"
@@ -201,7 +204,9 @@ for _ in $(seq 1 300); do
 done
 if [ "$fin" -lt "$frozen_best" ]; then
 	echo "finality never caught up to frozen best: fin=$fin best=$frozen_best" >&2
-	diag_log "$TMP_DIR/a-alice.log" 30
+	diag_log "$TMP_DIR/a-alice.log" 40
+	diag_log "$TMP_DIR/a-bob.log" 40
+	diag_log "$TMP_DIR/a-miner1.log" 20
 	exit 1
 fi
 echo "finality caught up to frozen best ($fin/$frozen_best)"
