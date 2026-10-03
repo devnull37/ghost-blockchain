@@ -211,8 +211,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mining::{miner_pre_runtime, pow_meets};
+    use crate::mining::{miner_pre_runtime, pow_meets, pow_value};
     use codec::Encode;
+    use proptest::prelude::*;
     use sp_runtime::{generic::Digest, testing::Header as TestHeader};
 
     #[test]
@@ -356,5 +357,69 @@ mod tests {
             bad,
         );
         assert_eq!(author_from_header(&header), None);
+    }
+
+    proptest! {
+        #[test]
+        fn seal_pre_hash_agrees_with_decode(
+            bytes in proptest::collection::vec(any::<u8>(), 0..80),
+        ) {
+            prop_assert_eq!(
+                seal_pre_hash(&bytes),
+                GhostSeal::decode_all(&mut &bytes[..]).ok().map(|s| s.pre_hash)
+            );
+        }
+
+        #[test]
+        fn seal_beats_is_an_order_on_decoded_seals(
+            a_nonce in any::<u64>(),
+            a_hash in any::<[u8; 32]>(),
+            b_nonce in any::<u64>(),
+            b_hash in any::<[u8; 32]>(),
+            garbage in proptest::collection::vec(any::<u8>(), 0..80),
+        ) {
+            let a = GhostSeal { nonce: a_nonce, pre_hash: a_hash }.encode();
+            let b = GhostSeal { nonce: b_nonce, pre_hash: b_hash }.encode();
+
+            // Irreflexive: nothing beats itself.
+            prop_assert!(!seal_beats(&a, &a));
+            prop_assert!(!seal_beats(&b, &b));
+            prop_assert!(!seal_beats(&garbage, &garbage));
+
+            // Total on distinct decoded seals: exactly one of a<b / b<a.
+            if a_hash != b_hash {
+                prop_assert_ne!(seal_beats(&a, &b), seal_beats(&b, &a),
+                    "distinct pre_hashes must order deterministically");
+            }
+            // Deterministic: same inputs, same verdict.
+            prop_assert_eq!(seal_beats(&a, &b), seal_beats(&a, &b));
+            // Undecodable input never wins against a decodable seal.
+            if GhostSeal::decode_all(&mut &garbage[..]).is_err() {
+                prop_assert!(!seal_beats(&a, &garbage));
+                prop_assert!(!seal_beats(&garbage, &a));
+            }
+        }
+
+        #[test]
+        fn verify_seal_never_panics_and_is_deterministic(
+            pre_hash in any::<[u8; 32]>(),
+            pre_digest in proptest::option::of(proptest::collection::vec(any::<u8>(), 0..64)),
+            seal_bytes in proptest::collection::vec(any::<u8>(), 0..80),
+            diff_be in any::<[u8; 32]>(),
+        ) {
+            let difficulty = U256::from_big_endian(&diff_be);
+            let first = verify_seal(&pre_hash, pre_digest.as_deref(), &seal_bytes, difficulty);
+            prop_assert_eq!(first, verify_seal(&pre_hash, pre_digest.as_deref(), &seal_bytes, difficulty));
+            // An accepted verdict implies every constituent check passed:
+            // the seal decodes, embeds this pre_hash, the author decodes, and
+            // the PoW value meets the work factor.
+            if first {
+                let seal = GhostSeal::decode_all(&mut &seal_bytes[..]).unwrap();
+                prop_assert_eq!(seal.pre_hash, pre_hash);
+                let pd = pre_digest.unwrap();
+                prop_assert!(crate::author_from_pre_digest(&pd).is_ok());
+                prop_assert!(pow_meets(pow_value(&pre_hash, &pd, &seal), difficulty));
+            }
+        }
     }
 }

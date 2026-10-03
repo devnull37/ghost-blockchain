@@ -26,7 +26,9 @@ mod difficulty;
 mod mining;
 mod select_chain;
 
-pub use algorithm::{author_from_header, verify_seal, GhostPowAlgorithm};
+pub use algorithm::{
+    author_from_header, seal_beats, seal_pre_hash, verify_seal, GhostPowAlgorithm,
+};
 pub use aux::{aux_key, read_aux, write_aux};
 pub use difficulty::{compute_next_difficulty, RETARGET_INTERVAL, TARGET_BLOCK_TIME_MS};
 pub use mining::{

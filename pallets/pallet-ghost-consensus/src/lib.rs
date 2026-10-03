@@ -61,7 +61,7 @@ use sp_staking::{
 use sp_std::{vec, vec::Vec};
 
 use crate::types::*;
-use ghost_pow_primitives::POW_ENGINE_ID;
+use ghost_pow_primitives::{compute_next_difficulty, POW_ENGINE_ID};
 
 /// Maximum size of a registered PQC (Dilithium5 / ML-DSA-87) public key.
 pub const MAX_PQC_KEY_SIZE: u32 = 2592;
@@ -739,28 +739,15 @@ pub mod pallet {
             });
         }
 
-        /// `floor(value * num / den)` with saturating overflow semantics.
-        ///
-        /// Exact when the result fits `U256`; `den == 0` is never passed.
-        fn mul_div_floor(value: U256, num: u64, den: u64) -> U256 {
-            if num == 0 || value.is_zero() {
-                return U256::zero();
-            }
-            let den = U256::from(den);
-            let num = U256::from(num);
-            // value = q*den + r with r < den, so r*num fits U256 (u64*u64).
-            let q = value / den;
-            let r = value % den;
-            q.saturating_mul(num).saturating_add(r * num / den)
-        }
-
         /// Retarget the difficulty work factor.
         ///
         /// `new = old * clamp(expected_ms / elapsed_ms, 1/4, 4)`:
         /// blocks arriving too fast (elapsed < expected) increase the work
         /// factor; too slow decreases it. `elapsed == 0` is treated as a
         /// max-up retarget. Floored at `MinDifficulty`, saturating at
-        /// `U256::MAX`.
+        /// `U256::MAX`. The math itself is shared with the node in
+        /// `ghost_pow_primitives::compute_next_difficulty` — do not reimplement
+        /// it here or the on-chain and off-chain copies can drift.
         fn retarget() {
             let now: u64 = pallet_timestamp::Pallet::<T>::get().saturated_into();
             let expected_ms =
@@ -775,17 +762,7 @@ pub mod pallet {
             }
 
             let elapsed = now.saturating_sub(LastRetargetTime::<T>::get());
-            let (num, den) = if elapsed == 0 || elapsed.saturating_mul(4) < expected_ms {
-                // > 4x faster than target (or instant): clamp factor to 4.
-                (4u64, 1u64)
-            } else if elapsed > expected_ms.saturating_mul(4) {
-                // > 4x slower than target: clamp factor to 1/4.
-                (1u64, 4u64)
-            } else {
-                (expected_ms, elapsed)
-            };
-
-            let new = Self::mul_div_floor(old, num, den).max(T::MinDifficulty::get());
+            let new = compute_next_difficulty(old, elapsed, expected_ms, T::MinDifficulty::get());
             if new != old {
                 Difficulty::<T>::put(new);
                 Self::deposit_event(Event::DifficultyRetargeted { old, new });
