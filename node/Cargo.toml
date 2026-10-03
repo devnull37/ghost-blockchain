@@ -62,6 +62,8 @@ substrate-frame-rpc-system = { workspace = true, default-features = true }
 # These dependencies are used for runtime benchmarking
 frame-benchmarking-cli = { workspace = true, default-features = true }
 
+serde_json = { workspace = true, default-features = true }
+
 # Local Dependencies
 ghost-consensus = { workspace = true }
 solochain-template-runtime = { workspace = true }
