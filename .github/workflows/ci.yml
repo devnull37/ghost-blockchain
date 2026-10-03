@@ -111,7 +111,12 @@ jobs:
         with:
           shared-key: dev
       # Real Wasm build via substrate-wasm-builder (no SKIP_WASM_BUILD).
-      - run: cargo build -p solochain-template-runtime
+      # `frame-system-rpc-runtime-api/std` is enabled explicitly because
+      # runtime/Cargo.toml declares the dependency but omits it from `std` —
+      # building the runtime standalone (-p) otherwise compiles that crate
+      # no_std and fails with E0433 (node builds hide it via feature
+      # unification). Drop the flag once the manifest is fixed upstream.
+      - run: cargo build -p solochain-template-runtime --features "frame-system-rpc-runtime-api/std"
 
   build-node:
     name: build-node
