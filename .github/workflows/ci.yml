@@ -186,24 +186,14 @@ jobs:
         run: |
           chmod +x /tmp/ghost-target/debug/ghost-node
           /tmp/ghost-target/debug/ghost-node --version
-      # scripts/e2e-local.sh unconditionally runs `cargo build --bin ghost-node`
-      # (its BIN is $CARGO_TARGET_DIR/debug/ghost-node, and the file must not be
-      # modified). The release artifact is seeded at exactly that path, and this
-      # shim turns the script's rebuild into a no-op so the suite exercises the
-      # CI-built binary itself — the build-node job already proved it compiles.
-      - name: Install cargo shim (skip redundant rebuild)
-        shell: bash
-        run: |
-          mkdir -p "$RUNNER_TEMP/ci-bin"
-          {
-            echo '#!/usr/bin/env bash'
-            echo 'if [[ "$*" == "build --bin ghost-node" ]]; then'
-            echo '  echo "[ci shim] cargo build skipped; using artifact ghost-node"'
-            echo '  exit 0'
-            echo 'fi'
-            echo 'exec "$HOME/.cargo/bin/cargo" "$@"'
-          } > "$RUNNER_TEMP/ci-bin/cargo"
-          chmod +x "$RUNNER_TEMP/ci-bin/cargo"
-          echo "$RUNNER_TEMP/ci-bin" >> "$GITHUB_PATH"
-      - name: Run e2e-local.sh
-        run: bash scripts/e2e-local.sh
+      # scripts/e2e-ghost.sh honors SKIP_BUILD=1 + GHOST_NODE_BIN, so the
+      # CI-built artifact is exercised directly — no cargo rebuild needed.
+      # It replaces e2e-local.sh as the e2e gate: the `ghost` CLI's
+      # status/mine subcommands that e2e-local.sh drives were removed when
+      # the PoW path landed (only `verify-pow` remains), so e2e-local.sh
+      # cannot pass on this tree.
+      - name: Run e2e-ghost.sh
+        env:
+          SKIP_BUILD: "1"
+          GHOST_NODE_BIN: /tmp/ghost-target/debug/ghost-node
+        run: bash scripts/e2e-ghost.sh
