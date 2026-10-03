@@ -23,7 +23,7 @@ Release bar: the standard a top-tier organization would apply before shipping a 
 - [x] Property tests (proptest): retarget bounds/monotonicity, seal verify accept/reject vs mining — PR #9/#10 (reward-conservation + selection-distribution properties in pallet tests)
 - [ ] Fuzz target for seal decode + digest parsing (bounded input, no panic on arbitrary bytes)
 - [ ] e2e on the Ghost path (`scripts/e2e-ghost.sh`): 2 miners + committee peer, author PoW blocks (seal digests via RPC), finalize, rewards land, restart+rejoin — IN FLIGHT
-- [ ] Soak (`scripts/soak-ghost.sh`): ≥4 nodes, ≥30 min, mixed restarts, finalized-head agreement, no finality stall — IN FLIGHT
+- [ ] Soak (`scripts/soak-ghost.sh`): ≥4 nodes, ≥30 min, mixed restarts, finalized-head agreement, no finality stall — harness + first report merged (PR #16): found `MinimumPeriod` ratchet rejected ~30-40% of seals (fixed 41abc2d); validation re-run pending
 - [ ] Failure-mode tests: miner halts (finality continues/liveness documented), validator offline (downtime slash fires), equivocation injected (slash fires) — partial (im-online path exists); adversarial e2e pending
 
 ### Ops baseline
