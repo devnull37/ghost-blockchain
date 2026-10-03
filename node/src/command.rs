@@ -1,12 +1,12 @@
 use crate::{
     benchmarking::{inherent_benchmark_data, RemarkBuilder, TransferKeepAliveBuilder},
     chain_spec,
-    cli::{Cli, GhostCommands, Subcommand},
+    cli::{Cli, GhostCommands, MiningCmd, Subcommand},
     service,
 };
 use frame_benchmarking_cli::{BenchmarkCmd, ExtrinsicFactory, SUBSTRATE_REFERENCE_HARDWARE};
 use sc_cli::SubstrateCli;
-use sc_service::PartialComponents;
+use sc_service::{ChainType, PartialComponents};
 use solochain_template_runtime::{Block, EXISTENTIAL_DEPOSIT};
 use sp_keyring::Sr25519Keyring;
 
@@ -46,7 +46,135 @@ impl SubstrateCli for Cli {
     }
 }
 
+/// Resolve the `--mine`/`--mining-threads`/`--miner-coinbase` flags into a
+/// `MiningConfig`. `--miner-coinbase` is required with `--mine` outside
+/// development chains, where it defaults to Alice (design doc §9).
+#[allow(clippy::result_large_err)]
+fn resolve_mining_config(
+    flags: &MiningCmd,
+    config: &sc_service::Configuration,
+) -> sc_cli::Result<service::MiningConfig> {
+    let threads = flags
+        .mining_threads
+        .or_else(|| std::thread::available_parallelism().map(|n| n.get()).ok())
+        .unwrap_or(1)
+        .max(1);
+
+    if !flags.mine {
+        return Ok(service::MiningConfig {
+            mine: false,
+            threads,
+            coinbase: None,
+        });
+    }
+
+    let coinbase = match flags.miner_coinbase.as_deref() {
+        Some(ss58) => sp_core::crypto::Ss58Codec::from_ss58check(ss58)
+            .map_err(|e| sc_cli::Error::Input(format!("invalid --miner-coinbase '{ss58}': {e}")))?,
+        None => {
+            if config.chain_spec.chain_type() == ChainType::Development {
+                Sr25519Keyring::Alice.to_account_id()
+            } else {
+                return Err(sc_cli::Error::Input(
+                    "--mine requires --miner-coinbase <SS58> (only --dev defaults to Alice)".into(),
+                ));
+            }
+        }
+    };
+
+    Ok(service::MiningConfig {
+        mine: true,
+        threads,
+        coinbase: Some(coinbase),
+    })
+}
+
+/// `ghost verify-pow <block-hash>`: re-verify a block's PoW seal against the
+/// local chain database (the block must have been imported by this node).
+#[allow(clippy::result_large_err)]
+fn verify_pow(client: std::sync::Arc<service::FullClient>, block_hash: &str) -> sc_cli::Result<()> {
+    use codec::Decode;
+    use ghost_consensus::GhostPowApi;
+    use sp_api::ProvideRuntimeApi;
+    use sp_runtime::traits::Header as HeaderT;
+
+    let hash: sp_core::H256 = block_hash
+        .parse()
+        .map_err(|_| sc_cli::Error::Input(format!("invalid block hash '{block_hash}'")))?;
+
+    let header = client
+        .header(hash)
+        .map_err(sc_cli::Error::Client)?
+        .ok_or_else(|| {
+            sc_cli::Error::Input(format!("block {hash} not found in the local database"))
+        })?;
+
+    // Same unsealing the import path applies: the trailing digest item must be
+    // `Seal(POW_ENGINE_ID, GhostSeal)`, and `pre_hash` is the header hash
+    // without it.
+    let mut unsealed = header.clone();
+    let seal_bytes = match unsealed.digest_mut().pop() {
+        Some(sp_runtime::DigestItem::Seal(engine, bytes))
+            if engine == ghost_consensus::POW_ENGINE_ID =>
+        {
+            bytes
+        }
+        _ => {
+            return Err(sc_cli::Error::Input(format!(
+                "block {hash} is unsealed or sealed by another engine"
+            )))
+        }
+    };
+    let pre_hash = unsealed.hash();
+
+    let pre_digest = unsealed.digest().logs().iter().find_map(|log| match log {
+        sp_runtime::DigestItem::PreRuntime(engine, bytes)
+            if engine == &ghost_consensus::POW_ENGINE_ID =>
+        {
+            Some(bytes.clone())
+        }
+        _ => None,
+    });
+
+    let seal = ghost_consensus::GhostSeal::decode(&mut &seal_bytes[..])
+        .map_err(|e| sc_cli::Error::Input(format!("malformed seal on {hash}: {e}")))?;
+    let author = ghost_consensus::author_from_header(&header);
+
+    let difficulty = client
+        .runtime_api()
+        .next_difficulty(*unsealed.parent_hash())
+        .map_err(|e| sc_cli::Error::Application(e.into()))?;
+
+    let valid = ghost_consensus::verify_seal(
+        pre_hash.as_ref(),
+        pre_digest.as_deref(),
+        &seal_bytes,
+        difficulty,
+    );
+
+    let number = *unsealed.number();
+    println!("block:    #{number} {hash}");
+    println!(
+        "miner:    {}",
+        author
+            .map(|a| a.to_string())
+            .unwrap_or_else(|| "<none>".into())
+    );
+    println!("nonce:    {}", seal.nonce);
+    println!("work factor (difficulty): {difficulty}");
+    println!("pow seal: {}", if valid { "VALID" } else { "INVALID" });
+
+    if valid {
+        Ok(())
+    } else {
+        Err(sc_cli::Error::Input(format!(
+            "PoW seal on block {hash} is INVALID"
+        )))
+    }
+}
+
 /// Parse and run command line arguments
+#[allow(clippy::result_large_err)]
 pub fn run() -> sc_cli::Result<()> {
     let cli = Cli::from_args();
 
@@ -197,160 +325,36 @@ pub fn run() -> sc_cli::Result<()> {
             let runner = cli.create_runner(cmd)?;
             runner.sync_run(|config| cmd.run::<Block>(&config))
         }
-        Some(Subcommand::Ghost(cmd)) => handle_ghost_command(cmd),
+        Some(Subcommand::Ghost(GhostCommands::VerifyPow(cmd))) => {
+            let runner = cli.create_runner(cmd)?;
+            let block_hash = cmd.block_hash.clone();
+            runner.async_run(|config| {
+                let PartialComponents {
+                    client,
+                    task_manager,
+                    ..
+                } = service::new_partial(&config)?;
+                Ok((async move { verify_pow(client, &block_hash) }, task_manager))
+            })
+        }
         None => {
             let runner = cli.create_runner(&cli.run)?;
-            runner.run_node_until_exit(|config| async move {
+            let mining_flags = cli.mining.clone();
+            runner.run_node_until_exit(move |config| async move {
+                let mining = resolve_mining_config(&mining_flags, &config)?;
                 match config.network.network_backend {
 					sc_network::config::NetworkBackendType::Libp2p => service::new_full::<
 						sc_network::NetworkWorker<
 							solochain_template_runtime::opaque::Block,
 							<solochain_template_runtime::opaque::Block as sp_runtime::traits::Block>::Hash,
 						>,
-					>(config)
+					>(config, mining)
 					.map_err(sc_cli::Error::Service),
 					sc_network::config::NetworkBackendType::Litep2p =>
-						service::new_full::<sc_network::Litep2pNetworkBackend>(config)
+						service::new_full::<sc_network::Litep2pNetworkBackend>(config, mining)
 							.map_err(sc_cli::Error::Service),
 				}
             })
-        }
-    }
-}
-
-/// Handle Ghost-specific CLI commands
-fn handle_ghost_command(cmd: &GhostCommands) -> sc_cli::Result<()> {
-    match cmd {
-        GhostCommands::Mine {
-            threads,
-            difficulty,
-        } => {
-            use crate::miner::{Miner, MiningBlockHeader};
-            use sp_core::H256;
-
-            let target_difficulty = difficulty.unwrap_or(u64::MAX / 1_000_000);
-
-            // Create a sample block header for mining demonstration
-            let block_header = MiningBlockHeader {
-                number: 1,
-                parent_hash: H256::zero(),
-                state_root: H256::from_low_u64_be(1),
-                extrinsics_root: H256::from_low_u64_be(2),
-                difficulty: target_difficulty,
-            };
-
-            let miner = Miner::new(*threads, target_difficulty);
-
-            match miner.start(block_header) {
-                Some((nonce, stats)) => {
-                    println!("\n📦 Local mining result:");
-                    println!("   Use this nonce: {}", nonce);
-                    println!("   Hashes computed: {}", stats.hashes_computed);
-                    println!("   Blocks found: {}", stats.blocks_found);
-                    println!("   Hash rate: {:.2} H/s", stats.hash_rate);
-                    println!("   Time elapsed: {:.2}s", stats.elapsed_time.as_secs_f64());
-                    println!(
-                        "   This build does not wire the miner into live block submission yet."
-                    );
-                }
-                None => {
-                    println!("\n⚠️  Local mining was interrupted or failed");
-                }
-            }
-
-            Ok(())
-        }
-        GhostCommands::Stake { amount, account } => {
-            println!("🔒 Staking call preview...");
-            println!("   Amount: {} Ghost tokens", amount);
-            if let Some(acc) = account {
-                println!("   Account: {}", acc);
-            } else {
-                println!("   Using default account (Alice)");
-            }
-            println!("   Minimum stake: 1 Ghost token");
-            println!("\n📝 The pallet prototype defines stake handling,");
-            println!("   but the node does not expose a live staking extrinsic flow yet.");
-            Ok(())
-        }
-        GhostCommands::Unstake { amount, account } => {
-            println!("🔓 Unstaking call preview...");
-            println!("   Amount: {} Ghost tokens", amount);
-            if let Some(acc) = account {
-                println!("   Account: {}", acc);
-            } else {
-                println!("   Using default account (Alice)");
-            }
-            println!("\n📝 The pallet prototype defines unstake handling,");
-            println!("   but the node does not expose a live unstaking extrinsic flow yet.");
-            Ok(())
-        }
-        GhostCommands::Balance { account } => {
-            println!("💰 Checking balance and staking information...");
-            if let Some(acc) = account {
-                println!("   Account: {}", acc);
-            } else {
-                println!("   Showing default development accounts:");
-                println!("\n   Alice:");
-                println!("      Address: 5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY");
-                println!("      Balance: 100 Ghost tokens (genesis)");
-                println!("\n   Bob:");
-                println!("      Address: 5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty");
-                println!("      Balance: 100 Ghost tokens (genesis)");
-            }
-            println!("\n💡 To check live balance, connect to your running node via:");
-            println!("   Polkadot.js Apps UI: https://polkadot.js.org/apps/#/accounts");
-            Ok(())
-        }
-        GhostCommands::Status { detailed } => {
-            println!("📊 Ghost Consensus Summary");
-            println!("═══════════════════════════════════════════════");
-            println!("   Consensus design: Hybrid PoW + PoS + PQC");
-            println!("   Live node authoring: Aura");
-            println!("   Live finality: GRANDPA");
-            println!("   Ghost pallet/runtime: informational prototype only");
-            println!("   Block Time: 5 seconds");
-            println!("   PoW Algorithm: Enhanced Blake2-256 (ASIC-resistant)");
-            println!("   Reward Distribution: 40% miner, 60% stakers (prototype)");
-            println!("   Block Reward: 10 Ghost tokens per block (prototype)");
-
-            if *detailed {
-                println!("\n📈 Detailed Information:");
-                println!("═══════════════════════════════════════════════");
-                println!("   Minimum Stake: 1 Ghost token (prototype)");
-                println!("   Slashing Conditions:");
-                println!("      - Double Signing: 100% stake slash");
-                println!("      - Invalid Block: 50% stake slash");
-                println!("      - Downtime (>100 blocks): 10% stake slash");
-                println!("\n   Phase Flow:");
-                println!("      1. PoW Mining - pallet/demo logic");
-                println!("      2. PoS Validation - pallet/demo logic");
-                println!("      3. Finalization - rewards bookkeeping prototype");
-                println!("\n   Network Info:");
-                println!("      Chain: Ghost Development Chain");
-                println!("      Runtime: FRAME-based (Substrate)");
-                println!("      Token: Ghost (GHTM)");
-                println!(
-                    "      PQC: Dilithium5 support is not wired into the live node RPC surface"
-                );
-            }
-
-            println!("\n💡 Connect your node to inspect live Aura/GRANDPA state.");
-            Ok(())
-        }
-        GhostCommands::Validators { active_only } => {
-            println!("👥 Validator Information");
-            println!("═══════════════════════════════════════════════");
-            if *active_only {
-                println!("   Filter: Active validators only");
-            } else {
-                println!("   Filter: All validators");
-            }
-            println!("\n   Default Genesis Validators:");
-            println!("      - Alice (5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY)");
-            println!("      - Bob (5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty)");
-            println!("\n💡 Live validator state still comes from the active runtime.");
-            Ok(())
         }
     }
 }
