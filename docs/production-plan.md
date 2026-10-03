@@ -21,9 +21,9 @@ Release bar: the standard a top-tier organization would apply before shipping a 
 ### Correctness & safety engineering
 - [x] `cargo test --workspace` green; `cargo fmt --check`; `cargo clippy -- -D warnings` zero warnings — CI green on PR #8; kept green through PR #13/#15
 - [x] Property tests (proptest): retarget bounds/monotonicity, seal verify accept/reject vs mining — PR #9/#10 (reward-conservation + selection-distribution properties in pallet tests)
-- [ ] Fuzz target for seal decode + digest parsing (bounded input, no panic on arbitrary bytes)
-- [ ] e2e on the Ghost path (`scripts/e2e-ghost.sh`): 2 miners + committee peer, author PoW blocks (seal digests via RPC), finalize, rewards land, restart+rejoin — IN FLIGHT
-- [ ] Soak (`scripts/soak-ghost.sh`): ≥4 nodes, ≥30 min, mixed restarts, finalized-head agreement, no finality stall — harness + first report merged (PR #16): found `MinimumPeriod` ratchet rejected ~30-40% of seals (fixed 41abc2d); validation re-run pending
+- [x] Fuzz target for seal decode + digest parsing (bounded input, no panic on arbitrary bytes) — PR #18 (4 cargo-fuzz targets ~17M execs zero crashes + found real retarget-math divergence, fixed via shared `compute_next_difficulty`)
+- [x] e2e on the Ghost path (`scripts/e2e-ghost.sh`): 2 miners + committee peer, author PoW blocks (seal digests via RPC), finalize, rewards land, restart+rejoin — PR #17 (7-check gate, CI e2e job repointed at it)
+- [ ] Soak (`scripts/soak-ghost.sh`): ≥4 nodes, ≥30 min, mixed restarts, finalized-head agreement, no finality stall — harness merged (PR #16); found `MinimumPeriod` ratchet (fixed 41abc2d, validated: rejects 90→0, rate 3.3×); full ≥30min run still pending
 - [ ] Failure-mode tests: miner halts (finality continues/liveness documented), validator offline (downtime slash fires), equivocation injected (slash fires) — partial (im-online path exists); adversarial e2e pending
 
 ### Ops baseline
