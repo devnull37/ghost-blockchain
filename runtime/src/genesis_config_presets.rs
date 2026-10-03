@@ -16,7 +16,7 @@
 // limitations under the License.
 
 use crate::{
-    AccountId, Balance, BalancesConfig, GhostConsensusConfig, ImOnlineConfig, Runtime,
+    AccountId, Balance, BalancesConfig, GhostConsensusConfig,
     SessionConfig, SessionKeys, SudoConfig, UNIT,
 };
 use alloc::{vec, vec::Vec};
@@ -80,12 +80,12 @@ fn testnet_genesis(
                 .map(|k| (k, 1u128 << 60))
                 .collect::<Vec<_>>(),
         },
-        "grandpa": pallet_grandpa::GenesisConfig::<Runtime> {
-            authorities: initial_authorities.iter().map(|x| (x.1.clone(), 1)).collect::<Vec<_>>(),
-            _config: Default::default(),
-        },
-        // ValidatorId == AccountId on Ghost; each authority registers its
-        // GRANDPA + im-online session keys.
+        // No `grandpa`/`imOnline` genesis sections: `pallet_session`'s
+        // `on_genesis_session` seeds `pallet_grandpa::Authorities` and
+        // `pallet_im_online::Keys` from these session keys, and both pallets'
+        // own genesis configs panic with "already initialized!" when also
+        // given. Session keys are the single source of truth for the
+        // genesis committee.
         "session": SessionConfig {
             keys: initial_authorities
                 .iter()
@@ -99,12 +99,6 @@ fn testnet_genesis(
                         },
                     )
                 })
-                .collect::<Vec<_>>(),
-        },
-        "imOnline": ImOnlineConfig {
-            keys: initial_authorities
-                .iter()
-                .map(|x| x.2.clone())
                 .collect::<Vec<_>>(),
         },
         // Genesis stakes make the authorities candidate validators before the
