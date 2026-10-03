@@ -623,12 +623,17 @@ pub mod pallet {
             Difficulty::<T>::get()
         }
 
-        /// Remove `who` from candidates and from the active validator set.
+        /// Remove `who` from the candidate set.
+        ///
+        /// Deliberately does NOT touch `ActiveValidators`: that mirrors the
+        /// committee actually seated by `pallet_session`, which keeps the
+        /// account voting until the next session boundary regardless. Chilling
+        /// takes effect through `select_validators` at the next `new_session`;
+        /// mutating the active set mid-session would desync the pallet's
+        /// record from the live GRANDPA committee (and would defeat the
+        /// empty-committee fallback in `new_session`).
         fn remove_candidate(who: &T::AccountId) {
             Candidates::<T>::mutate(|c| {
-                c.retain(|v| v != who);
-            });
-            ActiveValidators::<T>::mutate(|c| {
                 c.retain(|v| v != who);
             });
         }
@@ -800,7 +805,16 @@ pub mod pallet {
     /// one, so GRANDPA authority set changes are not issued gratuitously.
     impl<T: Config> pallet_session::SessionManager<T::AccountId> for Pallet<T> {
         fn new_session(_new_index: SessionIndex) -> Option<Vec<T::AccountId>> {
-            let set = Self::select_validators();
+            let mut set = Self::select_validators();
+            if set.is_empty() {
+                // An empty committee would stall GRANDPA finality forever
+                // (review M-4): keep the active committee instead. If there
+                // isn't one either, fall back to the genesis-declared set.
+                set = ActiveValidators::<T>::get().into_inner();
+                if set.is_empty() {
+                    set = InitialValidators::<T>::get().into_inner();
+                }
+            }
             let pending = BoundedVec::<T::AccountId, T::MaxValidators>::truncate_from(set.clone());
             PendingValidators::<T>::put(pending.clone());
             if set == ActiveValidators::<T>::get().into_inner() {

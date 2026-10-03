@@ -275,6 +275,68 @@ fn new_session_genesis_falls_back_to_initial_validators() {
 }
 
 #[test]
+fn new_session_empty_selection_keeps_active_committee() {
+    new_test_ext().execute_with(|| {
+        bond_and_validate(ALICE, 100);
+        bond_and_validate(BOB, 200);
+        <GhostConsensus as pallet_session::SessionManager<AccountId>>::new_session_genesis(0)
+            .unwrap();
+        <GhostConsensus as pallet_session::SessionManager<AccountId>>::start_session(0);
+        assert_eq!(
+            crate::ActiveValidators::<Test>::get().into_inner(),
+            vec![BOB, ALICE]
+        );
+
+        // Both candidates chill: selection would be empty, which would seat
+        // an empty GRANDPA committee and stall finality forever (M-4).
+        assert_ok!(GhostConsensus::chill(RuntimeOrigin::signed(ALICE)));
+        assert_ok!(GhostConsensus::chill(RuntimeOrigin::signed(BOB)));
+        assert!(crate::Candidates::<Test>::get().is_empty());
+
+        // Instead of Some([]) the active committee is retained, so the set
+        // equals the active one and `None` is returned (no gratuitous change).
+        assert_eq!(
+            <GhostConsensus as pallet_session::SessionManager<AccountId>>::new_session(1),
+            None
+        );
+        assert_eq!(
+            crate::PendingValidators::<Test>::get().into_inner(),
+            vec![BOB, ALICE]
+        );
+    });
+}
+
+#[test]
+fn new_session_empty_active_falls_back_to_initial_validators() {
+    new_test_ext().execute_with(|| {
+        // Pathological state: a past session seated an empty committee and no
+        // candidates exist — the genesis-declared set is re-seated rather
+        // than staying empty.
+        crate::InitialValidators::<Test>::put(BoundedVec::<u64, ConstU32<3>>::truncate_from(vec![
+            DAVE, EVE,
+        ]));
+        assert_eq!(
+            <GhostConsensus as pallet_session::SessionManager<AccountId>>::new_session(1),
+            Some(vec![DAVE, EVE])
+        );
+    });
+}
+
+#[test]
+fn new_session_empty_everything_is_documented_degraded() {
+    new_test_ext().execute_with(|| {
+        // With no candidates, no active committee, and no genesis fallbacks
+        // the chain is misconfigured; selection stays empty rather than
+        // fabricating validators.
+        assert_eq!(
+            <GhostConsensus as pallet_session::SessionManager<AccountId>>::new_session(1),
+            None
+        );
+        assert!(crate::PendingValidators::<Test>::get().is_empty());
+    });
+}
+
+#[test]
 fn session_lifecycle_tracks_active_validators() {
     new_test_ext().execute_with(|| {
         bond_and_validate(ALICE, 100);
@@ -530,7 +592,9 @@ fn on_offence_slashes_burns_chills_and_records() {
         assert_eq!(on_hold(ALICE), 300);
         assert_eq!(Balances::total_issuance(), issuance_before - 100);
         assert!(!crate::Candidates::<Test>::get().contains(&ALICE));
-        assert!(!crate::ActiveValidators::<Test>::get().contains(&ALICE));
+        // Stays in ActiveValidators until the next session boundary: that
+        // record mirrors the committee pallet_session still has seated.
+        assert!(crate::ActiveValidators::<Test>::get().contains(&ALICE));
 
         let records = crate::SlashRecords::<Test>::get();
         assert_eq!(records.len(), 1);
@@ -612,7 +676,9 @@ fn on_offence_full_unbond_does_not_escape_chill_or_slash() {
         // 25% of the unbonding chunk is burned and the offender is chilled.
         assert_eq!(on_hold(ALICE), 300);
         assert!(!crate::Candidates::<Test>::get().contains(&ALICE));
-        assert!(!crate::ActiveValidators::<Test>::get().contains(&ALICE));
+        // Removal from the seated committee happens at the session boundary,
+        // not mid-session (pallet_session still has them voting).
+        assert!(crate::ActiveValidators::<Test>::get().contains(&ALICE));
         let records = crate::SlashRecords::<Test>::get();
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].amount, 100);
