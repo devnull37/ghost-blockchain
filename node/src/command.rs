@@ -49,6 +49,7 @@ impl SubstrateCli for Cli {
 /// Resolve the `--mine`/`--mining-threads`/`--miner-coinbase` flags into a
 /// `MiningConfig`. `--miner-coinbase` is required with `--mine` outside
 /// development chains, where it defaults to Alice (design doc §9).
+#[allow(clippy::result_large_err)]
 fn resolve_mining_config(
     flags: &MiningCmd,
     config: &sc_service::Configuration,
@@ -90,6 +91,7 @@ fn resolve_mining_config(
 
 /// `ghost verify-pow <block-hash>`: re-verify a block's PoW seal against the
 /// local chain database (the block must have been imported by this node).
+#[allow(clippy::result_large_err)]
 fn verify_pow(client: std::sync::Arc<service::FullClient>, block_hash: &str) -> sc_cli::Result<()> {
     use codec::Decode;
     use ghost_consensus::GhostPowApi;
@@ -172,6 +174,7 @@ fn verify_pow(client: std::sync::Arc<service::FullClient>, block_hash: &str) -> 
 }
 
 /// Parse and run command line arguments
+#[allow(clippy::result_large_err)]
 pub fn run() -> sc_cli::Result<()> {
     let cli = Cli::from_args();
 
