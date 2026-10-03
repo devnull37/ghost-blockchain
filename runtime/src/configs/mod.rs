@@ -28,7 +28,8 @@ use frame_support::{
     derive_impl, parameter_types,
     pallet_prelude::BoundedVec,
     traits::{
-        ConstBool, ConstU128, ConstU32, ConstU64, ConstU8, KeyOwnerProofSystem, VariantCountOf,
+        ConstBool, ConstU128, ConstU32, ConstU64, ConstU8, Get, KeyOwnerProofSystem,
+        VariantCountOf,
     },
     weights::{
         constants::{RocksDbWeight, WEIGHT_REF_TIME_PER_SECOND},
@@ -349,11 +350,13 @@ impl pallet_ghost_consensus::PqcKeyProvider<AccountId> for PqcKeyAdapter {
 }
 
 /// Bonded-validator lookup for `pqc_attest` gating: at least `MinStake`
-/// bonded in the consensus pallet.
+/// bonded in the consensus pallet (queried from its Config so the two
+/// never drift).
 pub struct BondedValidatorAdapter;
 impl pallet_ghost_pqc::BondedValidatorProvider<AccountId> for BondedValidatorAdapter {
     fn is_bonded_validator(who: &AccountId) -> bool {
-        GhostConsensus::bonded(who) >= UNIT
+        GhostConsensus::bonded(who)
+            >= <Runtime as pallet_ghost_consensus::Config>::MinStake::get()
     }
 }
 
