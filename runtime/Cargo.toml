@@ -76,7 +76,19 @@ substrate-wasm-builder = { optional = true, workspace = true, default-features =
 [features]
 default = ["std"]
 metadata-hash = ["std"]
-runtime-benchmarks = ["frame-benchmarking", "frame-system-benchmarking"]
+runtime-benchmarks = [
+    "frame-benchmarking/runtime-benchmarks",
+    "frame-support/runtime-benchmarks",
+    "frame-system-benchmarking/runtime-benchmarks",
+    "frame-system/runtime-benchmarks",
+    "pallet-balances/runtime-benchmarks",
+    "pallet-ghost-consensus/runtime-benchmarks",
+    "pallet-grandpa/runtime-benchmarks",
+    "pallet-sudo/runtime-benchmarks",
+    "pallet-template/runtime-benchmarks",
+    "pallet-timestamp/runtime-benchmarks",
+    "sp-runtime/runtime-benchmarks",
+]
 try-runtime = ["frame-try-runtime"]
 std = [
     "codec/std",
@@ -111,5 +123,7 @@ std = [
     "sp-version/std",
     "scale-info/std",
     "serde_json/std",
-    "substrate-wasm-builder"
+    "substrate-wasm-builder",
+    "frame-benchmarking?/std",
+    "frame-system-benchmarking?/std",
 ]

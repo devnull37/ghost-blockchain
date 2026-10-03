@@ -5326,10 +5326,13 @@ dependencies = [
  "parity-scale-codec",
  "scale-info",
  "sp-core",
+ "sp-externalities",
  "sp-io",
  "sp-runtime",
  "sp-staking",
+ "sp-state-machine",
  "sp-std",
+ "sp-trie",
 ]
 
 [[package]]
@@ -5344,8 +5347,11 @@ dependencies = [
  "parity-scale-codec",
  "scale-info",
  "sp-core",
+ "sp-externalities",
  "sp-io",
  "sp-runtime",
+ "sp-state-machine",
+ "sp-trie",
 ]
 
 [[package]]

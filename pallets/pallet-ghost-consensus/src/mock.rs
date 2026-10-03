@@ -131,6 +131,21 @@ impl frame_support::traits::Get<bool> for RequirePqcFlag {
     }
 }
 
+/// Benchmark helper wiring the thread-local lookups: registers session keys
+/// and (when `RequirePqcKey` is set) a PQC key for the calling account, so the
+/// `validate` benchmark reaches the full worst-case check sequence.
+#[cfg(feature = "runtime-benchmarks")]
+pub struct MockBenchmarkHelper;
+#[cfg(feature = "runtime-benchmarks")]
+impl crate::BenchmarkHelper<Test> for MockBenchmarkHelper {
+    fn prepare_validate(who: &AccountId) {
+        set_keys_registered(*who, true);
+        if REQUIRE_PQC.with(|r| *r.borrow()) {
+            set_pqc_key(*who, true);
+        }
+    }
+}
+
 // -- Pallet config ------------------------------------------------------------
 
 pub const MIN_STAKE: Balance = 10;
@@ -164,6 +179,8 @@ impl pallet_ghost_consensus::Config for Test {
     type SessionKeysLookup = MockSessionKeysLookup;
     type PqcProvider = MockPqcProvider;
     type RequirePqcKey = RequirePqcFlag;
+    #[cfg(feature = "runtime-benchmarks")]
+    type BenchmarkHelper = MockBenchmarkHelper;
 }
 
 pub const ALICE: AccountId = 1;
