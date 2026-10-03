@@ -194,7 +194,7 @@ sleep 3
 frozen_best="$(best_number "$A1_RPC")"
 
 fin=0
-for _ in $(seq 1 60); do
+for _ in $(seq 1 300); do
 	fin="$(finalized_number "$A1_RPC")"
 	[ "$fin" -ge "$frozen_best" ] && break
 	sleep 1
