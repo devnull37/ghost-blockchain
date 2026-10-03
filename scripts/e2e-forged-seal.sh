@@ -25,6 +25,9 @@ export GHOST_E2E_HELPER_DIR="${GHOST_E2E_HELPER_DIR:-}"
 . "$(dirname "${BASH_SOURCE[0]}")/lib-ghost-rpc.sh"
 
 MINING_THREADS="${MINING_THREADS:-2}"
+# Per-node memory caps so three nodes fit on small boxes / CI runners.
+# Defaults are conservative; override via GHOST_NODE_MEM_ARGS.
+NODE_MEM_ARGS="${GHOST_NODE_MEM_ARGS:---db-cache 64 --max-runtime-instances 2 --runtime-cache-size 1}"
 WINDOW_BLOCKS="${WINDOW_BLOCKS:-8}"
 
 EVE_ACCT=e659a7a1628cdd93febc04a4e0646ea20e9f5f0ce097d9a05290d4a9e054df4e
@@ -105,7 +108,7 @@ fi
 
 echo "==> honest network up (alice committee+miner, miner1 keyless)"
 start "$TMP_DIR/a.log" "$BIN" \
-	--chain local --alice --validator \
+	--chain local --alice --validator $NODE_MEM_ARGS \
 	--mine --mining-threads "$MINING_THREADS" --miner-coinbase "$ALICE_SS58" \
 	--base-path "$TMP_DIR/a" --node-key "$A_KEY" \
 	--port "$A_PORT" --rpc-port "$A_RPC"
@@ -113,7 +116,7 @@ A_PID=$LAST_PID
 wait_rpc "$A_RPC"
 
 start "$TMP_DIR/m.log" "$BIN" \
-	--chain local --mine --mining-threads "$MINING_THREADS" \
+	--chain local --mine --mining-threads "$MINING_THREADS" $NODE_MEM_ARGS \
 	--miner-coinbase "$CHARLIE_SS58" \
 	--base-path "$TMP_DIR/m" --node-key "$M_KEY" \
 	--port "$M_PORT" --rpc-port "$M_RPC" \
@@ -127,7 +130,7 @@ wait_block_at_least "$A_RPC" $((base + 3)) "honest alice" 300
 
 echo "==> evil node joins and forges"
 start "$TMP_DIR/e.log" "$EVIL_BIN" \
-	--chain local --mine --mining-threads "$MINING_THREADS" \
+	--chain local --mine --mining-threads "$MINING_THREADS" $NODE_MEM_ARGS \
 	--miner-coinbase "$EVE_SS58" \
 	--base-path "$TMP_DIR/e" --node-key "$E_KEY" \
 	--port "$E_PORT" --rpc-port "$E_RPC" \
