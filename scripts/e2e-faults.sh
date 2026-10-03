@@ -90,7 +90,7 @@ start_node() {
 		prev="$arg"
 	done
 	# shellcheck disable=SC2086 # NODE_MEM_ARGS is intentionally word-split
-	"$BIN" "$@" $NODE_MEM_ARGS --no-telemetry -l warn >"$log" 2>&1 &
+	"$BIN" "$@" $NODE_MEM_ARGS --no-telemetry -l warn -l grandpa=info >"$log" 2>&1 &
 	LAST_PID=$!
 	LIVE_PIDS[$LAST_PID]=1
 }
