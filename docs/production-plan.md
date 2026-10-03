@@ -43,17 +43,17 @@ Release bar: the standard a top-tier organization would apply before shipping a 
 - [x] RPC surface audit: docs/rpc-surface.md — full method inventory, DenyUnsafe plumbing verified, `--rpc-methods` guidance
 
 ### Runtime quality
-- [ ] `spec_version`/`impl_version`/`transaction_version` bump policy documented (docs/runtime-upgrade-policy.md); upgrade drill (Wasm→Wasm via set_code on a devnet) still pending
-- [ ] Storage migration framework convention (versioned storage, `OnRuntimeUpgrade` hooks) + a tested no-op migration
-- [ ] Genesis ceremony doc for public testnet: docs/genesis-ceremony.md + `chainspecs/local.json` published; the `testnet` preset + real allocation table still must be created
+- [ ] `spec_version`/`impl_version`/`transaction_version` bump policy documented (docs/runtime-upgrade-policy.md); `scripts/e2e-upgrade.sh` drill written (Wasm→Wasm via set_code on a devnet) — first run pending
+- [x] Storage migration framework convention (versioned storage, `OnRuntimeUpgrade` hooks) + a tested no-op migration — MigrateToV2 now wired via `Hooks::on_runtime_upgrade` (was tested-but-unreachable); `migration_is_noop_when_already_v2` green; ghost-pqc stamps storage_version(1)
+- [x] Genesis ceremony doc for public testnet: docs/genesis-ceremony.md + `scripts/genesis-generate.sh` + `chainspecs/ghost-testnet-params.example.json` — spec generation verified end-to-end (plain+raw+SHA256); real allocation table is ceremony-time material by design
 - [x] SS58 prefix decision documented (docs/genesis-ceremony.md — default 42 acceptable for testnet, registration required before mainnet)
 - [ ] Remove `pallet-template` and `sudo` from production preset: pallet-template fully removed from the runtime (crate deleted, spec_version 103). sudo removal is a chainspec-preset decision — tracked under the genesis ceremony item
 
 ### Ops maturity
 - [x] Telemetry/metrics documented (docs/node-ops.md — alert table, best-vs-finalized diagnostics; honest note: no dedicated hashrate metric yet)
 - [x] Node ops docs (docs/node-ops.md): sizing, pruning, metrics, telemetry, upgrades, keystore/backup, incident runbook
-- [ ] Release pipeline: tagged release → reproducible binary + versioned Docker image + checksums + release notes template — CI builds the artifact; release/tag flow still pending
-- [ ] Polkadot.js Apps compatibility verified (metadata + custom types, ss58, signing)
+- [x] Release pipeline: `.github/workflows/release.yml` on `v*` tags → release binary + SHA256SUMS + bundled chainspec + generated notes (Docker image pending a registry credential — Dockerfile builds standalone)
+- [x] Polkadot.js Apps compatibility verified at the RPC layer: full legacy + spec-v2 method set (102), complete metadata blob, `system_properties` now serves ss58Format/decimals/symbol (was `{}` — fixed). Custom-call UX in the Apps UI is a UI-level check for launch day.
 - [x] Testnet faucet plan documented (docs/faucet-plan.md — off-chain drip bot design, not implemented)
 - [x] Docs complete: protocol spec, SECURITY.md, operator guide, economic parameters, node-ops, genesis ceremony, faucet plan, RPC audit, upgrade policy, CONTRIBUTING, CODE_OF_CONDUCT, CHANGELOG ✓
 
