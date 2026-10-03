@@ -64,12 +64,38 @@ else
 	HONEST_BIN="$TMP_DIR/ghost-node-honest"
 	cp "$BIN" "$HONEST_BIN"
 	BIN="$HONEST_BIN"
+	# Guard against a dirty/partially-patched tree: `patch -f` on an
+	# already-applied patch silently REVERSES (GNU patch behaviour), which
+	# previously left the tree evil-side-out. Refuse ambiguous state.
+	if grep -q "0xEE; 32" "$ROOT_DIR/consensus/ghost-consensus/src/mining.rs"; then
+		echo "forged-seal.patch already applied — restore the tree first (git checkout consensus/ghost-consensus/src/{mining,algorithm}.rs)" >&2
+		exit 1
+	fi
+	restore_tree() {
+		# Idempotent: only acts while the marker is present.
+		if grep -q "0xEE; 32" "$ROOT_DIR/consensus/ghost-consensus/src/mining.rs"; then
+			( cd "$ROOT_DIR" && patch -f -R -p1 < scripts/forged-seal.patch ) \
+				|| ( cd "$ROOT_DIR" && git checkout -- \
+					consensus/ghost-consensus/src/mining.rs \
+					consensus/ghost-consensus/src/algorithm.rs )
+		fi
+		# Hard verify: the marker must be gone after restore.
+		if grep -q "0xEE; 32" "$ROOT_DIR/consensus/ghost-consensus/src/mining.rs"; then
+			( cd "$ROOT_DIR" && git checkout -- \
+				consensus/ghost-consensus/src/mining.rs \
+				consensus/ghost-consensus/src/algorithm.rs )
+		fi
+	}
 	echo "applying scripts/forged-seal.patch"
 	( cd "$ROOT_DIR" && patch -f -p1 < scripts/forged-seal.patch )
-	trap 'kill $(printf "%s " "${!LIVE_PIDS[@]}") 2>/dev/null; sleep 1; kill -9 $(printf "%s " "${!LIVE_PIDS[@]}") 2>/dev/null; ( cd "'"$ROOT_DIR"'" && patch -f -R -p1 < scripts/forged-seal.patch ); rm -rf "$TMP_DIR"' EXIT
+	grep -q "0xEE; 32" "$ROOT_DIR/consensus/ghost-consensus/src/mining.rs" || {
+		echo "patch did not take effect — aborting before an honest-only build" >&2
+		exit 1
+	}
+	trap 'kill $(printf "%s " "${!LIVE_PIDS[@]}") 2>/dev/null; sleep 1; kill -9 $(printf "%s " "${!LIVE_PIDS[@]}") 2>/dev/null; restore_tree; rm -rf "$TMP_DIR"' EXIT
 	( cd "$ROOT_DIR" && cargo build --bin ghost-node )
 	cp "$TARGET_DIR/debug/ghost-node" "$EVIL_BIN"
-	( cd "$ROOT_DIR" && patch -f -R -p1 < scripts/forged-seal.patch )
+	restore_tree
 	# Rebuild the honest binary so the tree's binary matches the tree again
 	# (the file on disk is currently the evil build).
 	( cd "$ROOT_DIR" && cargo build --bin ghost-node )
