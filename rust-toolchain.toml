@@ -1,0 +1,8 @@
+# Pinned toolchain for reproducible builds.
+# stable2407-era SDK requires cargo >= 1.85 for edition2024 crates in the
+# lockfile, and wasm host-function imports fail to link on rustc 1.99+.
+[toolchain]
+channel = "1.88.0"
+components = ["rust-src", "rustfmt", "clippy"]
+targets = ["wasm32-unknown-unknown"]
+profile = "minimal"
