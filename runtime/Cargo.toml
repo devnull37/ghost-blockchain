@@ -29,9 +29,12 @@ frame-system = { workspace = true, default-features = false }
 frame-try-runtime = { optional = true, workspace = true, default-features = false }
 
 # frame pallets
-pallet-aura = { workspace = true, default-features = false }
+pallet-authorship = { workspace = true, default-features = false }
 pallet-balances = { workspace = true, default-features = false }
 pallet-grandpa = { workspace = true, default-features = false }
+pallet-im-online = { workspace = true, default-features = false }
+pallet-offences = { workspace = true, default-features = false }
+pallet-session = { workspace = true, default-features = false, features = ["historical"] }
 pallet-sudo = { workspace = true, default-features = false }
 pallet-timestamp = { workspace = true, default-features = false }
 pallet-transaction-payment = { workspace = true, default-features = false }
@@ -39,7 +42,6 @@ pallet-transaction-payment = { workspace = true, default-features = false }
 # primitives
 sp-api = { workspace = true, default-features = false }
 sp-block-builder = { workspace = true, default-features = false }
-sp-consensus-aura = { features = ["serde"], workspace = true, default-features = false }
 sp-consensus-grandpa = { features = ["serde"], workspace = true, default-features = false }
 sp-core = { features = ["serde"], workspace = true, default-features = false }
 sp-genesis-builder = { workspace = true, default-features = false }
@@ -65,6 +67,9 @@ pallet-template = { workspace = true, default-features = false }
 # Ghost Consensus pallet
 pallet-ghost-consensus = { path = "../pallets/pallet-ghost-consensus", default-features = false }
 
+# Ghost PoW primitives (GhostPowApi runtime api + POW_ENGINE_ID)
+ghost-pow-primitives = { workspace = true, default-features = false }
+
 [build-dependencies]
 substrate-wasm-builder = { optional = true, workspace = true, default-features = true }
 
@@ -79,19 +84,23 @@ std = [
     "frame-system/std",
     "frame-support/std",
     "frame-metadata-hash-extension/std",
-    "pallet-aura/std",
+    "frame-system-rpc-runtime-api/std",
+    "pallet-authorship/std",
     "pallet-balances/std",
     "pallet-grandpa/std",
+    "pallet-im-online/std",
+    "pallet-offences/std",
+    "pallet-session/std",
     "pallet-sudo/std",
     "pallet-timestamp/std",
     "pallet-transaction-payment/std",
     "pallet-transaction-payment-rpc-runtime-api/std",
     "pallet-ghost-consensus/std",
+    "ghost-pow-primitives/std",
     "sp-core/std",
     "sp-runtime/std",
     "sp-api/std",
     "sp-block-builder/std",
-    "sp-consensus-aura/std",
     "sp-consensus-grandpa/std",
     "sp-genesis-builder/std",
     "sp-inherents/std",

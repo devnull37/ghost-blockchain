@@ -52,8 +52,8 @@ pub mod opaque {
 
 impl_opaque_keys! {
     pub struct SessionKeys {
-        pub aura: Aura,
         pub grandpa: Grandpa,
+        pub im_online: ImOnline,
     }
 }
 
@@ -69,7 +69,7 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
     //   `spec_version`, and `authoring_version` are the same between Wasm and native.
     // This value is set to 100 to notify Polkadot-JS App (https://polkadot.js.org/apps) to use
     //   the compatible custom types.
-    spec_version: 100,
+    spec_version: 101,
     impl_version: 1,
     apis: apis::RUNTIME_API_VERSIONS,
     transaction_version: 1,
@@ -201,9 +201,6 @@ mod runtime {
     #[runtime::pallet_index(1)]
     pub type Timestamp = pallet_timestamp;
 
-    #[runtime::pallet_index(2)]
-    pub type Aura = pallet_aura;
-
     #[runtime::pallet_index(3)]
     pub type Grandpa = pallet_grandpa;
 
@@ -220,7 +217,25 @@ mod runtime {
     #[runtime::pallet_index(7)]
     pub type Template = pallet_template;
 
-    // Include the Ghost Consensus pallet
+    // Include the Ghost Consensus pallet. It must come before Session so
+    // genesis stakes/candidates exist when session genesis selects the
+    // initial validator set.
     #[runtime::pallet_index(8)]
     pub type GhostConsensus = pallet_ghost_consensus;
+
+    #[runtime::pallet_index(9)]
+    pub type Session = pallet_session;
+
+    // Historical session trie (equivocation proof data).
+    #[runtime::pallet_index(10)]
+    pub type Historical = pallet_session::historical::Pallet<Runtime>;
+
+    #[runtime::pallet_index(11)]
+    pub type Authorship = pallet_authorship;
+
+    #[runtime::pallet_index(12)]
+    pub type Offences = pallet_offences;
+
+    #[runtime::pallet_index(13)]
+    pub type ImOnline = pallet_im_online;
 }

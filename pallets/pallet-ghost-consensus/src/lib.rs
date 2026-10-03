@@ -1,45 +1,114 @@
-//! # Ghost Consensus Pallet
+//! # Ghost Consensus Pallet (v2)
 //!
-//! This pallet implements a hybrid Proof-of-Work (PoW) and Proof-of-Stake (PoS) consensus mechanism
-//! for the Ghost blockchain. It combines the security of PoW with the efficiency of PoS.
+//! On-chain state for Ghost consensus per `docs/ghost-consensus-design.md`:
 //!
-//! ## Overview
+//! * **Staking** — `bond`/`bond_extra`/`unbond`/`withdraw_unbonded` using
+//!   `pallet_balances` *holds* (funds stay on the account, unspendable), with a
+//!   bounded per-account unbonding-chunk queue.
+//! * **Validator set** — implements `pallet_session::SessionManager` (and the
+//!   `historical` specialization): each session picks the top `MaxValidators`
+//!   candidates by bonded stake, tie-broken by account id.
+//! * **Difficulty** — `Difficulty` is a U256 *work factor* (larger = harder;
+//!   the client verifies `hash * difficulty <= U256::MAX`). `on_initialize`
+//!   retargets it every `RetargetInterval` blocks toward `TargetBlockTimeMs`
+//!   using `new = old * clamp(expected_ms / elapsed_ms, 1/4, 4)`.
+//! * **Rewards** — per block, the miner is decoded from the seal-bound
+//!   `PreRuntime(POW_ENGINE_ID, SCALE(AccountId32))` digest (unspoofable);
+//!   `BlockReward` is minted 40% to the author and 60% pro-rata by bonded stake
+//!   to the current session's validators (empty set -> pallet reserve account;
+//!   rounding remainder -> author).
+//! * **Slashing** — `OnOffenceHandler` (wired to `pallet_offences` + GRANDPA
+//!   equivocation + im-online unresponsiveness in the runtime) slashes the
+//!   reported fraction of bonded stake, burns it, chills the offender, and
+//!   records a bounded `SlashRecord`.
 //!
-//! The Ghost consensus mechanism works as follows:
-//! 1. Miners perform PoW to find a valid nonce
-//! 2. Validators are selected based on their stake weight
-//! 3. Selected validators sign the PoW-mined blocks
-//! 4. Rewards are distributed: 40% to miner, 60% to stakers
-//! 5. Slashing for misbehavior (double-signing, invalid blocks, downtime)
+//! There are deliberately no block-submission or validation extrinsics: PoW
+//! seal verification lives in the client (`sc-consensus-pow`), finality in
+//! GRANDPA. This pallet only tracks stake, difficulty, rewards, and slashes.
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
 pub use pallet::*;
 
-pub mod functions;
-pub mod types;
-
-#[cfg(feature = "runtime-benchmarks")]
-mod benchmarking;
+// TODO: reintroduce `mod benchmarking` with real benchmarks for every
+// extrinsic before any public network claim (production-plan P0). The
+// `runtime-benchmarks` Cargo feature is kept so the wiring point is obvious.
+pub mod migrations;
 #[cfg(test)]
 mod mock;
 #[cfg(test)]
 mod tests;
+pub mod types;
 
+use codec::Decode;
 use frame_support::{
     pallet_prelude::*,
-    traits::{Currency, ExistenceRequirement},
+    traits::{
+        fungible::{Inspect, InspectHold, Mutate, MutateHold},
+        tokens::{Fortitude, Precision},
+    },
 };
 use frame_system::pallet_prelude::*;
-use sp_runtime::sp_std::vec::Vec;
-use sp_runtime::traits::{
-    AccountIdConversion, BlakeTwo256, Hash, SaturatedConversion, Saturating, Zero,
+use sp_core::U256;
+use sp_runtime::{
+    traits::{SaturatedConversion, Saturating, Zero},
+    DigestItem, Perbill,
 };
+use sp_staking::{
+    offence::{OffenceDetails, OnOffenceHandler},
+    SessionIndex,
+};
+use sp_std::{vec, vec::Vec};
 
-use crate::functions::*;
 use crate::types::*;
+use ghost_pow_primitives::POW_ENGINE_ID;
 
-type BalanceOf<T> = <T as pallet_balances::Config>::Balance;
+/// Maximum size of a registered PQC (Dilithium5 / ML-DSA-87) public key.
+pub const MAX_PQC_KEY_SIZE: u32 = 2592;
+
+/// Upper bound on retained `SlashRecords` (oldest are dropped when full).
+pub const MAX_SLASH_RECORDS: u32 = 1024;
+
+/// Upper bound on `RecentAuthors` (rolling window of block authors).
+pub const MAX_RECENT_AUTHORS: u32 = 100;
+
+type BalanceOf<T> =
+    <<T as Config>::Currency as Inspect<<T as frame_system::Config>::AccountId>>::Balance;
+
+/// Source of truth for whether an account has registered session keys.
+///
+/// The runtime wires this to `pallet_session` (`NextKeys`); `()` is permissive
+/// and returns `true` for chains that do not gate validation on session keys.
+pub trait SessionKeysLookup<AccountId> {
+    /// Whether `who` has session keys registered for the next session.
+    fn keys_registered(who: &AccountId) -> bool;
+}
+
+impl<AccountId> SessionKeysLookup<AccountId> for () {
+    fn keys_registered(_who: &AccountId) -> bool {
+        true
+    }
+}
+
+/// Provider of validator PQC public keys (Dilithium5 / ML-DSA-87).
+///
+/// Implemented by `pallet-ghost-pqc` once wired into the runtime; `()` is the
+/// fallback returning `false`/`None` (no PQC keys registered).
+pub trait PqcKeyProvider<AccountId> {
+    /// Whether `who` has a registered PQC public key.
+    fn has_pqc_key(who: &AccountId) -> bool;
+    /// The registered PQC public key of `who`, if any.
+    fn pqc_key(who: &AccountId) -> Option<BoundedVec<u8, ConstU32<MAX_PQC_KEY_SIZE>>>;
+}
+
+impl<AccountId> PqcKeyProvider<AccountId> for () {
+    fn has_pqc_key(_who: &AccountId) -> bool {
+        false
+    }
+    fn pqc_key(_who: &AccountId) -> Option<BoundedVec<u8, ConstU32<MAX_PQC_KEY_SIZE>>> {
+        None
+    }
+}
 
 #[frame_support::pallet]
 pub mod pallet {
@@ -47,598 +116,835 @@ pub mod pallet {
 
     /// The pallet's configuration trait.
     #[pallet::config]
-    pub trait Config: frame_system::Config + pallet_balances::Config {
+    pub trait Config: frame_system::Config + pallet_timestamp::Config {
         /// The overarching runtime event type.
         type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 
-        /// Weight information for extrinsics.
+        /// The stakable currency (pallet_balances). Holds are taken under
+        /// [`HoldReason::Staking`].
+        type Currency: Mutate<Self::AccountId>
+            + InspectHold<Self::AccountId, Reason = Self::RuntimeHoldReason>
+            + MutateHold<Self::AccountId, Reason = Self::RuntimeHoldReason>;
+
+        /// Runtime hold reason aggregate; must accept this pallet's
+        /// [`HoldReason`].
+        type RuntimeHoldReason: From<HoldReason> + Parameter + Member + Copy;
+
+        /// Weight information for extrinsics. TODO: replace with generated
+        /// benchmarks before public testnet (production-plan P0).
         type WeightInfo: WeightInfo;
 
-        /// Block reward amount
-        #[pallet::constant]
-        type BlockReward: Get<BalanceOf<Self>>;
-
-        /// Minimum stake required to participate in PoS
-        #[pallet::constant]
-        type MinStake: Get<BalanceOf<Self>>;
-
-        /// Maximum downtime blocks before slashing
-        #[pallet::constant]
-        type MaxDowntimeBlocks: Get<u32>;
-
-        /// Double sign slash percentage
-        #[pallet::constant]
-        type DoubleSignSlashPercentage: Get<u8>;
-
-        /// Invalid block slash percentage
-        #[pallet::constant]
-        type InvalidBlockSlashPercentage: Get<u8>;
-
-        /// Downtime slash percentage
-        #[pallet::constant]
-        type DowntimeSlashPercentage: Get<u8>;
-
-        /// The pallet ID
+        /// The pallet's own account (receives the validator share of the block
+        /// reward when there are no validators, as a reserve).
         #[pallet::constant]
         type PalletId: Get<frame_support::PalletId>;
 
-        /// Whether PoS validation must verify a Dilithium5 signature on-chain.
-        ///
-        /// Keep this disabled until a deterministic no_std/Wasm verifier is wired in.
+        /// Amount minted per block and split 40% author / 60% validators.
         #[pallet::constant]
-        type PqcRequired: Get<bool>;
+        type BlockReward: Get<BalanceOf<Self>>;
+
+        /// Minimum bonded stake required to bond, or to be a validator
+        /// candidate.
+        #[pallet::constant]
+        type MinStake: Get<BalanceOf<Self>>;
+
+        /// Maximum total bonded stake per account.
+        #[pallet::constant]
+        type MaxStake: Get<BalanceOf<Self>>;
+
+        /// Maximum number of validators in a session set.
+        #[pallet::constant]
+        type MaxValidators: Get<u32>;
+
+        /// Maximum number of validator candidates tracked at once.
+        #[pallet::constant]
+        type MaxValidatorCandidates: Get<u32>;
+
+        /// Number of blocks an unbonded chunk stays locked before it can be
+        /// withdrawn.
+        #[pallet::constant]
+        type UnbondingPeriod: Get<BlockNumberFor<Self>>;
+
+        /// Maximum number of concurrent unbonding chunks per account.
+        #[pallet::constant]
+        type MaxUnbondingChunks: Get<u32>;
+
+        /// Difficulty retarget cadence, in blocks (design: 100).
+        #[pallet::constant]
+        type RetargetInterval: Get<u32>;
+
+        /// Target block time in milliseconds (design: 5000).
+        #[pallet::constant]
+        type TargetBlockTimeMs: Get<u64>;
+
+        /// Absolute floor for the difficulty work factor (>= 1).
+        #[pallet::constant]
+        type MinDifficulty: Get<U256>;
+
+        /// Lookup for whether an account has registered session keys
+        /// (required for `validate`).
+        type SessionKeysLookup: SessionKeysLookup<Self::AccountId>;
+
+        /// Provider of validator PQC public keys (`()` until
+        /// `pallet-ghost-pqc` is wired into the runtime).
+        type PqcProvider: PqcKeyProvider<Self::AccountId>;
+
+        /// When true, `validate` requires a registered PQC key from
+        /// `PqcProvider`. Kept false until `pallet-ghost-pqc` exists.
+        #[pallet::constant]
+        type RequirePqcKey: Get<bool>;
+    }
+
+    /// Reason funds are held: bonded Ghost stake.
+    #[pallet::composite_enum]
+    pub enum HoldReason {
+        /// Funds bonded as Ghost validator stake.
+        #[codec(index = 0)]
+        Staking,
     }
 
     #[pallet::pallet]
+    #[pallet::storage_version(migrations::STORAGE_VERSION)]
     pub struct Pallet<T>(_);
 
-    /// Current mining difficulty
+    /// Current PoW difficulty — a *work factor* (larger = harder).
+    ///
+    /// The client verifies `hash * difficulty <= U256::MAX`; retargeted every
+    /// `RetargetInterval` blocks toward `TargetBlockTimeMs`.
     #[pallet::storage]
-    pub type Difficulty<T: Config> = StorageValue<_, u64, ValueQuery>;
+    pub type Difficulty<T: Config> = StorageValue<_, U256, ValueQuery>;
 
-    /// Current consensus phase
+    /// Timestamp (ms) at which the last difficulty retarget ran.
     #[pallet::storage]
-    pub type CurrentPhase<T: Config> = StorageValue<_, ConsensusPhase, ValueQuery>;
+    pub type LastRetargetTime<T: Config> = StorageValue<_, u64, ValueQuery>;
 
-    /// Block headers storage
+    /// Number of retarget intervals completed. The first boundary only
+    /// establishes the baseline timestamp ("skip genesis window").
     #[pallet::storage]
-    pub type BlockHeaders<T: Config> = StorageMap<_, Blake2_128Concat, u32, GhostBlockHeader>;
+    pub type RetargetsDone<T: Config> = StorageValue<_, u32, ValueQuery>;
 
-    /// Block producers by block number
+    /// Currently bonded (held) stake per account.
     #[pallet::storage]
-    pub type BlockProducers<T: Config> = StorageMap<_, Blake2_128Concat, u32, T::AccountId>;
+    pub type Bonded<T: Config> =
+        StorageMap<_, Blake2_128Concat, T::AccountId, BalanceOf<T>, ValueQuery>;
 
-    /// Validator stakes
+    /// Per-account queue of unbonding chunks, bounded by `MaxUnbondingChunks`.
+    /// Funds remain held until `withdraw_unbonded` releases matured chunks.
     #[pallet::storage]
-    pub type ValidatorStakes<T: Config> =
-        StorageMap<_, Blake2_128Concat, T::AccountId, BalanceOf<T>>;
-
-    /// Last active block for validators
-    #[pallet::storage]
-    pub type LastActiveBlock<T: Config> =
-        StorageMap<_, Blake2_128Concat, T::AccountId, u32, ValueQuery>;
-
-    /// Double sign reports
-    #[pallet::storage]
-    pub type DoubleSignReports<T: Config> =
-        StorageMap<_, Blake2_128Concat, T::AccountId, bool, ValueQuery>;
-
-    /// Invalid block reports
-    #[pallet::storage]
-    pub type InvalidBlockReports<T: Config> =
-        StorageMap<_, Blake2_128Concat, T::AccountId, bool, ValueQuery>;
-
-    /// Slashing records
-    #[pallet::storage]
-    #[pallet::unbounded]
-    pub type SlashingRecords<T: Config> = StorageValue<
+    pub type Unbonding<T: Config> = StorageMap<
         _,
-        Vec<(
-            T::AccountId,
-            SlashingReason,
-            BalanceOf<T>,
-            BlockNumberFor<T>,
-        )>,
+        Blake2_128Concat,
+        T::AccountId,
+        BoundedVec<UnbondingChunk<BalanceOf<T>, BlockNumberFor<T>>, T::MaxUnbondingChunks>,
         ValueQuery,
     >;
+
+    /// Opted-in validator candidates, bounded by `MaxValidatorCandidates`.
+    /// Insertion order; re-sorted by stake at every session rotation.
+    #[pallet::storage]
+    pub type Candidates<T: Config> =
+        StorageValue<_, BoundedVec<T::AccountId, T::MaxValidatorCandidates>, ValueQuery>;
+
+    /// Validator set planned for the next session (computed by `new_session`).
+    #[pallet::storage]
+    pub type PendingValidators<T: Config> =
+        StorageValue<_, BoundedVec<T::AccountId, T::MaxValidators>, ValueQuery>;
+
+    /// Validator set active in the current session (promoted at
+    /// `start_session`). Used for the 60% reward split.
+    #[pallet::storage]
+    pub type ActiveValidators<T: Config> =
+        StorageValue<_, BoundedVec<T::AccountId, T::MaxValidators>, ValueQuery>;
+
+    /// Genesis-declared fallback validators, used by `new_session_genesis`
+    /// when nothing is bonded yet so a dev chain can still start.
+    #[pallet::storage]
+    pub type InitialValidators<T: Config> =
+        StorageValue<_, BoundedVec<T::AccountId, T::MaxValidators>, ValueQuery>;
+
+    /// Bounded rolling window of slashing records (newest at the end; when
+    /// full the oldest record is dropped).
+    #[pallet::storage]
+    pub type SlashRecords<T: Config> = StorageValue<
+        _,
+        BoundedVec<
+            SlashRecord<T::AccountId, BalanceOf<T>, BlockNumberFor<T>>,
+            ConstU32<MAX_SLASH_RECORDS>,
+        >,
+        ValueQuery,
+    >;
+
+    /// Bounded rolling window of the last `MAX_RECENT_AUTHORS` block authors
+    /// decoded from PoW pre-runtime digests (telemetry/entropy source).
+    #[pallet::storage]
+    pub type RecentAuthors<T: Config> =
+        StorageValue<_, BoundedVec<T::AccountId, ConstU32<MAX_RECENT_AUTHORS>>, ValueQuery>;
+
+    /// The pallet's genesis config.
+    #[pallet::genesis_config]
+    #[derive(frame_support::DefaultNoBound)]
+    pub struct GenesisConfig<T: Config> {
+        /// Initial PoW difficulty work factor.
+        pub difficulty: U256,
+        /// Accounts bonded at genesis as `(account, amount)`.
+        pub stakers: Vec<(T::AccountId, BalanceOf<T>)>,
+        /// Fallback validator set for `new_session_genesis` when no stakes
+        /// exist yet (dev chains only).
+        pub initial_validators: Vec<T::AccountId>,
+    }
+
+    #[pallet::genesis_build]
+    impl<T: Config> BuildGenesisConfig for GenesisConfig<T> {
+        fn build(&self) {
+            Difficulty::<T>::put(self.difficulty.max(T::MinDifficulty::get()));
+
+            let mut initial = BoundedVec::<T::AccountId, T::MaxValidators>::default();
+            for v in &self.initial_validators {
+                // Bounded to MaxValidators; extras are dropped.
+                let _ = initial.try_push(v.clone());
+            }
+            InitialValidators::<T>::put(initial);
+
+            for (who, amount) in &self.stakers {
+                assert!(
+                    *amount >= T::MinStake::get(),
+                    "genesis staker below MinStake"
+                );
+                T::Currency::hold(&HoldReason::Staking.into(), who, *amount)
+                    .expect("genesis staker must be able to hold");
+                Bonded::<T>::insert(who, *amount);
+                if !Candidates::<T>::get().contains(who) {
+                    let _ = Candidates::<T>::try_mutate(|c| c.try_push(who.clone()));
+                }
+            }
+        }
+    }
 
     /// Events that functions in this pallet can emit.
     #[pallet::event]
     #[pallet::generate_deposit(pub(super) fn deposit_event)]
     pub enum Event<T: Config> {
-        /// A new block has been mined
-        BlockMined {
-            block_number: u32,
-            miner: T::AccountId,
-            nonce: u64,
+        /// `who` bonded `added` stake (total bonded now `total`).
+        Bonded {
+            who: T::AccountId,
+            added: BalanceOf<T>,
+            total: BalanceOf<T>,
         },
-        /// A validator has been selected for PoS
-        ValidatorSelected {
-            validator: T::AccountId,
-            weight: u64,
+        /// `who` scheduled `amount` to unbond; withdrawable at `unlock_at`.
+        Unbonded {
+            who: T::AccountId,
+            amount: BalanceOf<T>,
+            unlock_at: BlockNumberFor<T>,
         },
-        /// Block rewards have been distributed
-        RewardsDistributed {
-            miner: T::AccountId,
-            miner_reward: BalanceOf<T>,
-            stakers_reward: BalanceOf<T>,
-        },
-        /// A validator has been slashed
-        ValidatorSlashed {
-            validator: T::AccountId,
-            reason: SlashingReason,
+        /// `who` withdrew `amount` of matured unbonded stake.
+        WithdrawnUnbonded {
+            who: T::AccountId,
             amount: BalanceOf<T>,
         },
-        /// Difficulty has been adjusted
-        DifficultyAdjusted {
-            old_difficulty: u64,
-            new_difficulty: u64,
+        /// `who` joined the validator candidate set.
+        CandidateJoined { who: T::AccountId },
+        /// `who` left the validator candidate set.
+        Chilled { who: T::AccountId },
+        /// `who` was slashed `amount` for an offence committed in `session`.
+        Slashed {
+            who: T::AccountId,
+            amount: BalanceOf<T>,
+            session_index: SessionIndex,
         },
+        /// Block reward paid: `author` got `author_reward`, validators split
+        /// `validators_reward` (or the reserve when the set was empty).
+        BlockRewarded {
+            author: T::AccountId,
+            author_reward: BalanceOf<T>,
+            validators_reward: BalanceOf<T>,
+        },
+        /// No `PreRuntime(POW_ENGINE_ID, ..)` digest, or it failed to decode:
+        /// the block reward was skipped. Never panics.
+        BlockRewardSkipped { block_number: BlockNumberFor<T> },
+        /// Difficulty retargeted from `old` to `new`.
+        DifficultyRetargeted { old: U256, new: U256 },
     }
 
     /// Errors that can be returned by this pallet.
     #[pallet::error]
     pub enum Error<T> {
-        /// Invalid block number
-        InvalidBlockNumber,
-        /// Invalid parent hash
-        InvalidParentHash,
-        /// Invalid PoW
-        InvalidPow,
-        /// Difficulty too low
-        DifficultyTooLow,
-        /// Difficulty too high
-        DifficultyTooHigh,
-        /// Insufficient stake
-        InsufficientStake,
-        /// Not a validator
-        NotAValidator,
-        /// Block not found
-        BlockNotFound,
-        /// Invalid phase transition
-        InvalidPhaseTransition,
-        /// Invalid PQC signature
-        InvalidPqcSignature,
-        /// PQC public key not found
-        PqcPublicKeyNotFound,
+        /// Bond amount is below `MinStake` (or a `validate`/`unbond` caller
+        /// would end up below it where that is disallowed).
+        BondBelowMinimum,
+        /// Bond would push the account's total bonded stake above `MaxStake`.
+        BondAboveMaximum,
+        /// The account has no bonded stake.
+        NotBonded,
+        /// Unbond amount exceeds the account's bonded stake.
+        InsufficientBond,
+        /// `MaxUnbondingChunks` reached; wait for a chunk to mature and call
+        /// `withdraw_unbonded` first.
+        TooManyUnbondingChunks,
+        /// `MaxValidatorCandidates` reached.
+        TooManyCandidates,
+        /// The account is already a validator candidate.
+        AlreadyCandidate,
+        /// The account is not a validator candidate.
+        NotCandidate,
+        /// `validate` requires session keys registered via `set_keys`.
+        KeysNotRegistered,
+        /// `validate` requires a registered PQC key (when `RequirePqcKey`).
+        PqcKeyRequired,
+        /// Nothing matured to withdraw.
+        NothingToWithdraw,
     }
-
-    /// PQC Public Keys for validators
-    #[pallet::storage]
-    pub type ValidatorPqcPublicKeys<T: Config> =
-        StorageMap<_, Blake2_128Concat, T::AccountId, [u8; 2592]>;
-
-    /// Rolling window of the last 100 block producers
-    #[pallet::storage]
-    pub type RecentBlockProducers<T: Config> =
-        StorageValue<_, BoundedVec<T::AccountId, ConstU32<100>>, ValueQuery>;
-
-    /// Current entropy value (scaled by 10^6)
-    #[pallet::storage]
-    pub type CurrentEntropy<T> = StorageValue<_, u64, ValueQuery>;
 
     /// The pallet's dispatchable functions.
     #[pallet::call]
     impl<T: Config> Pallet<T> {
-        /// Submit a mined block with PoW solution
+        /// Bond `amount` of free balance as stake (pallet_balances hold).
+        ///
+        /// `amount` must be >= `MinStake` on first bond; the resulting total
+        /// must not exceed `MaxStake`.
         #[pallet::call_index(0)]
-        #[pallet::weight(<T as Config>::WeightInfo::submit_block())]
-        pub fn submit_block(
-            origin: OriginFor<T>,
-            block_header: GhostBlockHeader,
-        ) -> DispatchResult {
-            let miner = ensure_signed(origin)?;
-
+        #[pallet::weight(<T as Config>::WeightInfo::bond())]
+        pub fn bond(origin: OriginFor<T>, amount: BalanceOf<T>) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+            let bonded = Self::bonded(&who);
             ensure!(
-                CurrentPhase::<T>::get() == ConsensusPhase::PowMining,
-                Error::<T>::InvalidPhaseTransition
+                bonded.is_zero() && amount >= T::MinStake::get() || !bonded.is_zero(),
+                Error::<T>::BondBelowMinimum
             );
+            Self::do_bond(&who, amount)
+        }
 
-            ensure!(block_header.number > 0, Error::<T>::InvalidBlockNumber);
+        /// Add `amount` to an existing bond. No minimum applies to the added
+        /// amount; the resulting total must still not exceed `MaxStake`.
+        #[pallet::call_index(1)]
+        #[pallet::weight(<T as Config>::WeightInfo::bond_extra())]
+        pub fn bond_extra(origin: OriginFor<T>, amount: BalanceOf<T>) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+            ensure!(!Self::bonded(&who).is_zero(), Error::<T>::NotBonded);
+            Self::do_bond(&who, amount)
+        }
 
-            // Validate the block header
-            let parent_number = block_header
-                .number
-                .checked_sub(1)
-                .ok_or(Error::<T>::InvalidBlockNumber)?;
-            let parent_header =
-                BlockHeaders::<T>::get(parent_number).ok_or(Error::<T>::BlockNotFound)?;
+        /// Move `amount` of bonded stake into the unbonding queue. Funds stay
+        /// held until `UnbondingPeriod` elapses and `withdraw_unbonded` runs.
+        #[pallet::call_index(2)]
+        #[pallet::weight(<T as Config>::WeightInfo::unbond())]
+        pub fn unbond(origin: OriginFor<T>, amount: BalanceOf<T>) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+            let bonded = Self::bonded(&who);
+            ensure!(!bonded.is_zero(), Error::<T>::NotBonded);
+            ensure!(bonded >= amount, Error::<T>::InsufficientBond);
+            ensure!(!amount.is_zero(), Error::<T>::InsufficientBond);
 
-            validate_block_header::<T>(&block_header, &parent_header)?;
+            let unlock_at =
+                frame_system::Pallet::<T>::block_number().saturating_add(T::UnbondingPeriod::get());
 
-            // Store the block header
-            BlockHeaders::<T>::insert(block_header.number, block_header.clone());
-            BlockProducers::<T>::insert(block_header.number, miner.clone());
+            Unbonding::<T>::try_mutate(&who, |chunks| -> DispatchResult {
+                chunks
+                    .try_push(UnbondingChunk { amount, unlock_at })
+                    .map_err(|_| Error::<T>::TooManyUnbondingChunks)?;
+                Ok(())
+            })?;
 
-            // Update recent block producers
-            let mut recent = RecentBlockProducers::<T>::get();
-            if recent.len() >= 100 {
-                recent.remove(0);
+            let remaining = bonded.saturating_sub(amount);
+            if remaining.is_zero() {
+                Bonded::<T>::remove(&who);
+            } else {
+                Bonded::<T>::insert(&who, remaining);
             }
-            let _ = recent.try_push(miner.clone());
-            RecentBlockProducers::<T>::put(recent);
 
-            // Update last active block for miner
-            LastActiveBlock::<T>::insert(&miner, block_header.number);
+            Self::deposit_event(Event::Unbonded {
+                who,
+                amount,
+                unlock_at,
+            });
+            Ok(())
+        }
 
-            // Transition to PoS validation phase
-            CurrentPhase::<T>::put(ConsensusPhase::PosValidation);
+        /// Release all matured unbonding chunks back to the free balance.
+        #[pallet::call_index(3)]
+        #[pallet::weight(<T as Config>::WeightInfo::withdraw_unbonded())]
+        pub fn withdraw_unbonded(origin: OriginFor<T>) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+            let now = frame_system::Pallet::<T>::block_number();
 
-            Self::deposit_event(Event::BlockMined {
-                block_number: block_header.number,
-                miner: miner.clone(),
-                nonce: block_header.nonce,
+            let mut matured = BalanceOf::<T>::zero();
+            Unbonding::<T>::mutate(&who, |chunks| {
+                chunks.retain(|chunk| {
+                    if chunk.unlock_at <= now {
+                        matured = matured.saturating_add(chunk.amount);
+                        false
+                    } else {
+                        true
+                    }
+                });
             });
 
-            Ok(())
-        }
+            ensure!(!matured.is_zero(), Error::<T>::NothingToWithdraw);
 
-        /// Stake tokens to participate in PoS validation
-        #[pallet::call_index(1)]
-        #[pallet::weight(<T as Config>::WeightInfo::stake())]
-        pub fn stake(origin: OriginFor<T>, amount: BalanceOf<T>) -> DispatchResult {
-            let staker = ensure_signed(origin)?;
-
-            ensure!(amount >= T::MinStake::get(), Error::<T>::InsufficientStake);
-
-            pallet_balances::Pallet::<T>::transfer(
-                &staker,
-                &Self::account_id(),
-                amount,
-                ExistenceRequirement::KeepAlive,
+            let released = T::Currency::release(
+                &HoldReason::Staking.into(),
+                &who,
+                matured,
+                Precision::BestEffort,
             )?;
 
-            // Update stake
-            let current_stake = ValidatorStakes::<T>::get(&staker).unwrap_or_default();
-            ValidatorStakes::<T>::insert(&staker, current_stake + amount);
-
+            Self::deposit_event(Event::WithdrawnUnbonded {
+                who: who.clone(),
+                amount: released,
+            });
             Ok(())
         }
 
-        /// Unstake tokens
-        #[pallet::call_index(2)]
-        #[pallet::weight(<T as Config>::WeightInfo::unstake())]
-        pub fn unstake(origin: OriginFor<T>, amount: BalanceOf<T>) -> DispatchResult {
-            let staker = ensure_signed(origin)?;
-
-            let current_stake =
-                ValidatorStakes::<T>::get(&staker).ok_or(Error::<T>::NotAValidator)?;
-
-            ensure!(current_stake >= amount, Error::<T>::InsufficientStake);
-
-            // Update stake
-            ValidatorStakes::<T>::insert(&staker, current_stake - amount);
-
-            pallet_balances::Pallet::<T>::transfer(
-                &Self::account_id(),
-                &staker,
-                amount,
-                ExistenceRequirement::AllowDeath,
-            )?;
-
-            Ok(())
-        }
-
-        /// Select and validate PoS validator
-        #[pallet::call_index(3)]
-        #[pallet::weight(<T as Config>::WeightInfo::validate_block())]
-        pub fn validate_block(
-            origin: OriginFor<T>,
-            block_number: u32,
-            pqc_signature: PqcSignature,
-        ) -> DispatchResult {
-            let validator = ensure_signed(origin)?;
-
-            // Check if validator has stake
+        /// Opt a bonded staker into the validator candidate set.
+        ///
+        /// Requires bonded stake >= `MinStake`, session keys registered
+        /// (`pallet_session::set_keys`), and — when `RequirePqcKey` is set — a
+        /// registered PQC key from `PqcProvider`.
+        #[pallet::call_index(4)]
+        #[pallet::weight(<T as Config>::WeightInfo::validate())]
+        pub fn validate(origin: OriginFor<T>) -> DispatchResult {
+            let who = ensure_signed(origin)?;
             ensure!(
-                ValidatorStakes::<T>::contains_key(&validator),
-                Error::<T>::NotAValidator
+                Self::bonded(&who) >= T::MinStake::get(),
+                Error::<T>::BondBelowMinimum
             );
-
-            let block_header =
-                BlockHeaders::<T>::get(block_number).ok_or(Error::<T>::BlockNotFound)?;
-
-            // Ensure we are in PoS validation phase
             ensure!(
-                CurrentPhase::<T>::get() == ConsensusPhase::PosValidation,
-                Error::<T>::InvalidPhaseTransition
+                T::SessionKeysLookup::keys_registered(&who),
+                Error::<T>::KeysNotRegistered
             );
-
-            // Select validator based on stake
-            let stakers = ValidatorStakes::<T>::iter()
-                .map(|(account, stake)| ValidatorStake {
-                    account,
-                    stake,
-                    weight: stake.saturated_into(),
-                })
-                .collect::<Vec<_>>();
-
-            let seed =
-                BlakeTwo256::hash_of(&(block_number, frame_system::Pallet::<T>::block_number()));
-            let selection =
-                select_pos_validator::<T>(stakers, seed).ok_or(Error::<T>::NotAValidator)?;
-
-            ensure!(selection.validator == validator, Error::<T>::NotAValidator);
-
-            if T::PqcRequired::get() {
-                // Verify PQC Signature
-                let pqc_public_key = ValidatorPqcPublicKeys::<T>::get(&validator)
-                    .ok_or(Error::<T>::PqcPublicKeyNotFound)?;
-
-                let message = BlakeTwo256::hash_of(&(validator.clone(), block_number));
+            if T::RequirePqcKey::get() {
                 ensure!(
-                    verify_pqc_signature(message.as_bytes(), &pqc_signature.0, &pqc_public_key),
-                    Error::<T>::InvalidPqcSignature
+                    T::PqcProvider::has_pqc_key(&who),
+                    Error::<T>::PqcKeyRequired
                 );
             }
-
-            // Sign the block
-            let signature = BlakeTwo256::hash_of(&(validator.clone(), block_number));
-            let mut signed_header = block_header;
-            signed_header.validator_signature = Some(signature);
-            signed_header.pqc_signature = Some(pqc_signature);
-
-            BlockHeaders::<T>::insert(block_number, signed_header);
-
-            // Distribute rewards
-            let reward = calculate_block_reward::<T>(T::BlockReward::get());
-            let miner = Self::get_miner_for_block(block_number)?;
-            let stakers_list = ValidatorStakes::<T>::iter()
-                .map(|(account, stake)| ValidatorStake {
-                    account,
-                    stake,
-                    weight: stake.saturated_into(),
-                })
-                .collect();
-
-            distribute_rewards::<T>(miner.clone(), stakers_list, reward.clone())?;
-
-            // Update last active block
-            LastActiveBlock::<T>::insert(&validator, block_number);
-
-            // Transition to finalization phase
-            CurrentPhase::<T>::put(ConsensusPhase::Finalization);
-
-            Self::deposit_event(Event::ValidatorSelected {
-                validator,
-                weight: selection.weight,
-            });
-
-            Self::deposit_event(Event::RewardsDistributed {
-                miner,
-                miner_reward: reward.miner_reward,
-                stakers_reward: reward.stakers_reward,
-            });
-
+            ensure!(
+                !Candidates::<T>::get().contains(&who),
+                Error::<T>::AlreadyCandidate
+            );
+            Candidates::<T>::try_mutate(|c| {
+                c.try_push(who.clone())
+                    .map_err(|_| Error::<T>::TooManyCandidates)
+            })?;
+            Self::deposit_event(Event::CandidateJoined { who });
             Ok(())
         }
 
-        /// Register PQC public key
+        /// Leave the validator candidate set (stays bonded).
         #[pallet::call_index(5)]
-        #[pallet::weight(<T as Config>::WeightInfo::register_pqc_key())]
-        pub fn register_pqc_key(origin: OriginFor<T>, public_key: [u8; 2592]) -> DispatchResult {
-            let validator = ensure_signed(origin)?;
-            ValidatorPqcPublicKeys::<T>::insert(&validator, public_key);
-            Ok(())
-        }
-
-        /// Report validator misbehavior
-        #[pallet::call_index(4)]
-        #[pallet::weight(<T as Config>::WeightInfo::report_misbehavior())]
-        pub fn report_misbehavior(
-            origin: OriginFor<T>,
-            validator: T::AccountId,
-            reason: SlashingReason,
-        ) -> DispatchResult {
-            let _reporter = ensure_signed(origin)?;
-
-            match reason {
-                SlashingReason::DoubleSigning => {
-                    DoubleSignReports::<T>::insert(&validator, true);
-                }
-                SlashingReason::InvalidBlock => {
-                    InvalidBlockReports::<T>::insert(&validator, true);
-                }
-                _ => {}
-            }
-
-            // Apply slashing - simplified for now
-            let slash_percentage = match reason {
-                SlashingReason::DoubleSigning => T::DoubleSignSlashPercentage::get(),
-                SlashingReason::InvalidBlock => T::InvalidBlockSlashPercentage::get(),
-                SlashingReason::Downtime => T::DowntimeSlashPercentage::get(),
-                SlashingReason::Other => 10,
-            };
-
-            let current_stake = ValidatorStakes::<T>::get(&validator).unwrap_or_default();
-            let slash_amount = (current_stake * slash_percentage.into()) / 100u32.into();
-            ValidatorStakes::<T>::insert(&validator, current_stake.saturating_sub(slash_amount));
-
-            Self::deposit_event(Event::ValidatorSlashed {
-                validator,
-                reason,
-                amount: slash_amount,
-            });
-
+        #[pallet::weight(<T as Config>::WeightInfo::chill())]
+        pub fn chill(origin: OriginFor<T>) -> DispatchResult {
+            let who = ensure_signed(origin)?;
+            ensure!(
+                Candidates::<T>::get().contains(&who),
+                Error::<T>::NotCandidate
+            );
+            Self::remove_candidate(&who);
+            Self::deposit_event(Event::Chilled { who });
             Ok(())
         }
     }
 
-    /// Helper functions
+    /// Helper functions.
     impl<T: Config> Pallet<T> {
-        /// Account that escrows active validator stake.
-        fn account_id() -> T::AccountId {
+        /// The pallet's own account (reward reserve sink).
+        pub fn account_id() -> T::AccountId {
+            use sp_runtime::traits::AccountIdConversion;
             T::PalletId::get().into_account_truncating()
         }
 
-        /// Get miner for a block
-        fn get_miner_for_block(block_number: u32) -> Result<T::AccountId, Error<T>> {
-            BlockProducers::<T>::get(block_number).ok_or(Error::<T>::BlockNotFound)
+        /// Bonded stake of `who` (zero when not bonded).
+        pub fn bonded(who: &T::AccountId) -> BalanceOf<T> {
+            Bonded::<T>::get(who)
         }
 
-        /// Distribute block rewards to miner and stakers
-        pub fn distribute_block_rewards(miner: T::AccountId, _block_number: u32) -> DispatchResult {
-            let total_reward = T::BlockReward::get();
-            let reward = calculate_block_reward::<T>(total_reward);
+        /// The difficulty work factor the next block must satisfy.
+        ///
+        /// Called by the runtime's `GhostPowApi::next_difficulty` impl; used by
+        /// `sc-consensus-pow` on every import.
+        pub fn next_difficulty() -> U256 {
+            Difficulty::<T>::get()
+        }
 
-            // Reward the miner (40%)
-            let _ = pallet_balances::Pallet::<T>::deposit_creating(&miner, reward.miner_reward);
-
-            // Collect all stakers
-            let stakers: Vec<ValidatorStake<T::AccountId, BalanceOf<T>>> =
-                ValidatorStakes::<T>::iter()
-                    .map(|(account, stake)| ValidatorStake {
-                        account,
-                        stake,
-                        weight: stake.saturated_into(),
-                    })
-                    .collect();
-
-            // Distribute to stakers proportionally (60%)
-            if !stakers.is_empty() {
-                let total_stake: BalanceOf<T> =
-                    stakers.iter().fold(Zero::zero(), |acc, s| acc + s.stake);
-                if !total_stake.is_zero() {
-                    for staker in stakers {
-                        let staker_reward = (reward.stakers_reward * staker.stake) / total_stake;
-                        let _ = pallet_balances::Pallet::<T>::deposit_creating(
-                            &staker.account,
-                            staker_reward,
-                        );
-                    }
-                }
-            }
-
-            Self::deposit_event(Event::RewardsDistributed {
-                miner,
-                miner_reward: reward.miner_reward,
-                stakers_reward: reward.stakers_reward,
+        /// Remove `who` from candidates and from the active validator set.
+        fn remove_candidate(who: &T::AccountId) {
+            Candidates::<T>::mutate(|c| {
+                c.retain(|v| v != who);
             });
+            ActiveValidators::<T>::mutate(|c| {
+                c.retain(|v| v != who);
+            });
+        }
 
+        /// Shared bond/bond_extra implementation.
+        fn do_bond(who: &T::AccountId, amount: BalanceOf<T>) -> DispatchResult {
+            let total = Self::bonded(who).saturating_add(amount);
+            ensure!(total <= T::MaxStake::get(), Error::<T>::BondAboveMaximum);
+            T::Currency::hold(&HoldReason::Staking.into(), who, amount)?;
+            Bonded::<T>::insert(who, total);
+            Self::deposit_event(Event::Bonded {
+                who: who.clone(),
+                added: amount,
+                total,
+            });
             Ok(())
         }
 
-        /// Check and apply slashing for downtime
-        pub fn check_downtime_slashing() {
-            let current_block = frame_system::Pallet::<T>::block_number().saturated_into::<u32>();
-            let max_downtime = T::MaxDowntimeBlocks::get();
+        /// Validator selection for session planning: top `MaxValidators`
+        /// candidates by bonded stake, tie-broken by account id (ascending) —
+        /// fully deterministic.
+        fn select_validators() -> Vec<T::AccountId> {
+            let mut scored: Vec<(T::AccountId, BalanceOf<T>)> = Candidates::<T>::get()
+                .into_iter()
+                .map(|who| (who.clone(), Self::bonded(&who)))
+                .filter(|(_, bonded)| *bonded >= T::MinStake::get())
+                .collect();
+            scored.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+            scored.truncate(T::MaxValidators::get() as usize);
+            scored.into_iter().map(|(who, _)| who).collect()
+        }
 
-            for (validator, last_active) in LastActiveBlock::<T>::iter() {
-                if current_block.saturating_sub(last_active) > max_downtime {
-                    // Apply downtime slashing
-                    let slash_percentage = T::DowntimeSlashPercentage::get();
-                    if let Some(stake) = ValidatorStakes::<T>::get(&validator) {
-                        let slash_amount = (stake * slash_percentage.into()) / 100u32.into();
-                        let new_stake = stake.saturating_sub(slash_amount);
-                        ValidatorStakes::<T>::insert(&validator, new_stake);
+        /// Decode the block author from this block's `PreRuntime(POW_ENGINE_ID,
+        /// SCALE(AccountId32))` digest item. Returns `None` when absent or
+        /// malformed — never panics.
+        fn block_author() -> Option<T::AccountId> {
+            frame_system::Pallet::<T>::digest()
+                .logs
+                .iter()
+                .find_map(|item| match item {
+                    DigestItem::PreRuntime(id, data) if *id == POW_ENGINE_ID => {
+                        T::AccountId::decode(&mut &data[..]).ok()
+                    }
+                    _ => None,
+                })
+        }
 
-                        // Record slashing
-                        let mut records = SlashingRecords::<T>::get();
-                        records.push((
-                            validator.clone(),
-                            SlashingReason::Downtime,
-                            slash_amount,
-                            frame_system::Pallet::<T>::block_number(),
-                        ));
-                        SlashingRecords::<T>::put(records);
+        /// Mint and split the block reward: 40% author / 60% pro-rata by
+        /// bonded stake over `ActiveValidators` (pallet account when empty or
+        /// all-zero). Rounding remainder goes to the author.
+        fn distribute_block_reward(author: &T::AccountId) {
+            let total = T::BlockReward::get();
+            if total.is_zero() {
+                return;
+            }
 
-                        Self::deposit_event(Event::ValidatorSlashed {
-                            validator,
-                            reason: SlashingReason::Downtime,
-                            amount: slash_amount,
-                        });
+            RecentAuthors::<T>::mutate(|recent| {
+                if recent.is_full() {
+                    recent.remove(0);
+                }
+                let _ = recent.try_push(author.clone());
+            });
+
+            let author_reward = Perbill::from_percent(40).mul_floor(total);
+            let validators_pot = total.saturating_sub(author_reward);
+
+            let stakers: Vec<(T::AccountId, BalanceOf<T>)> = ActiveValidators::<T>::get()
+                .into_iter()
+                .map(|who| (who.clone(), Self::bonded(&who)))
+                .filter(|(_, bonded)| !bonded.is_zero())
+                .collect();
+            let total_stake: BalanceOf<T> = stakers
+                .iter()
+                .fold(Zero::zero(), |acc, (_, s)| acc.saturating_add(*s));
+
+            let mut validators_paid = BalanceOf::<T>::zero();
+            if total_stake.is_zero() {
+                // No (staked) validators: the validator share goes to the
+                // pallet account as a reserve.
+                let _ = T::Currency::mint_into(&Self::account_id(), validators_pot);
+                validators_paid = validators_pot;
+            } else {
+                for (who, stake) in stakers {
+                    // U256 intermediates: pot * stake fits u128^2, no overflow.
+                    let share: BalanceOf<T> = (U256::from(validators_pot.saturated_into::<u128>())
+                        .saturating_mul(U256::from(stake.saturated_into::<u128>()))
+                        / U256::from(total_stake.saturated_into::<u128>()))
+                    .saturated_into::<u128>()
+                    .saturated_into();
+                    if !share.is_zero() {
+                        let _ = T::Currency::mint_into(&who, share);
+                        validators_paid = validators_paid.saturating_add(share);
                     }
                 }
             }
+
+            // Rounding remainder goes to the author (no dust accumulation).
+            let remainder = total
+                .saturating_sub(author_reward)
+                .saturating_sub(validators_paid);
+            let author_total = author_reward.saturating_add(remainder);
+            let _ = T::Currency::mint_into(author, author_total);
+
+            Self::deposit_event(Event::BlockRewarded {
+                author: author.clone(),
+                author_reward: author_total,
+                validators_reward: validators_paid,
+            });
         }
 
-        /// Adjust difficulty based on block time and entropy
-        pub fn adjust_difficulty() {
-            let current_difficulty = Difficulty::<T>::get();
-            let target_block_time = 5u64; // 5 seconds
-
-            // In a real implementation, calculate actual block time from recent blocks
-            // For now, use a simple adjustment
-            let actual_block_time = 5u64; // Placeholder
-
-            // Calculate entropy
-            let producers = RecentBlockProducers::<T>::get().to_vec();
-            let entropy = calculate_entropy::<T>(producers);
-            CurrentEntropy::<T>::put(entropy);
-
-            let new_difficulty = calculate_difficulty_adjustment::<T>(
-                current_difficulty,
-                actual_block_time,
-                target_block_time,
-                entropy,
-            );
-
-            if new_difficulty != current_difficulty {
-                Difficulty::<T>::put(new_difficulty);
-                Self::deposit_event(Event::DifficultyAdjusted {
-                    old_difficulty: current_difficulty,
-                    new_difficulty,
-                });
+        /// `floor(value * num / den)` with saturating overflow semantics.
+        ///
+        /// Exact when the result fits `U256`; `den == 0` is never passed.
+        fn mul_div_floor(value: U256, num: u64, den: u64) -> U256 {
+            if num == 0 || value.is_zero() {
+                return U256::zero();
             }
+            let den = U256::from(den);
+            let num = U256::from(num);
+            // value = q*den + r with r < den, so r*num fits U256 (u64*u64).
+            let q = value / den;
+            let r = value % den;
+            q.saturating_mul(num).saturating_add(r * num / den)
+        }
+
+        /// Retarget the difficulty work factor.
+        ///
+        /// `new = old * clamp(expected_ms / elapsed_ms, 1/4, 4)`:
+        /// blocks arriving too fast (elapsed < expected) increase the work
+        /// factor; too slow decreases it. `elapsed == 0` is treated as a
+        /// max-up retarget. Floored at `MinDifficulty`, saturating at
+        /// `U256::MAX`.
+        fn retarget() {
+            let now: u64 = pallet_timestamp::Pallet::<T>::get().saturated_into();
+            let expected_ms =
+                u64::from(T::RetargetInterval::get()).saturating_mul(T::TargetBlockTimeMs::get());
+            let old = Difficulty::<T>::get();
+
+            // First boundary only establishes the baseline timestamp.
+            if RetargetsDone::<T>::get().is_zero() {
+                RetargetsDone::<T>::put(1u32);
+                LastRetargetTime::<T>::put(now);
+                return;
+            }
+
+            let elapsed = now.saturating_sub(LastRetargetTime::<T>::get());
+            let (num, den) = if elapsed == 0 || elapsed.saturating_mul(4) < expected_ms {
+                // > 4x faster than target (or instant): clamp factor to 4.
+                (4u64, 1u64)
+            } else if elapsed > expected_ms.saturating_mul(4) {
+                // > 4x slower than target: clamp factor to 1/4.
+                (1u64, 4u64)
+            } else {
+                (expected_ms, elapsed)
+            };
+
+            let new = Self::mul_div_floor(old, num, den).max(T::MinDifficulty::get());
+            if new != old {
+                Difficulty::<T>::put(new);
+                Self::deposit_event(Event::DifficultyRetargeted { old, new });
+            }
+            RetargetsDone::<T>::mutate(|done| *done = done.saturating_add(1));
+            LastRetargetTime::<T>::put(now);
         }
     }
 
-    /// Hooks for automatic behavior
+    /// Hooks for automatic behavior.
     #[pallet::hooks]
     impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
-        /// Called at the beginning of each block
+        /// Retarget the difficulty work factor every `RetargetInterval` blocks.
         fn on_initialize(n: BlockNumberFor<T>) -> Weight {
-            // Check for downtime slashing every 10 blocks
-            if (n % 10u32.into()).is_zero() {
-                Self::check_downtime_slashing();
+            let mut weight = T::DbWeight::get().reads(2);
+            if !n.is_zero() && (n % T::RetargetInterval::get().into()).is_zero() {
+                Self::retarget();
+                weight += T::DbWeight::get().reads_writes(3, 3);
             }
-
-            // Adjust difficulty every 100 blocks
-            if (n % 100u32.into()).is_zero() {
-                Self::adjust_difficulty();
-            }
-
-            Weight::from_parts(10_000, 0)
+            weight
         }
 
-        /// Called at the end of each block
-        fn on_finalize(_n: BlockNumberFor<T>) {
-            // Transition back to PoW mining phase for next block
-            if CurrentPhase::<T>::get() == ConsensusPhase::Finalization {
-                CurrentPhase::<T>::put(ConsensusPhase::PowMining);
+        /// Attribute and split the block reward from the PoW author digest.
+        fn on_finalize(n: BlockNumberFor<T>) {
+            match Self::block_author() {
+                Some(author) => Self::distribute_block_reward(&author),
+                None => Self::deposit_event(Event::BlockRewardSkipped { block_number: n }),
             }
+        }
+    }
+
+    /// `pallet_session::SessionManager`: select the validator set per session.
+    ///
+    /// Returns `Some(set)` only when the computed set differs from the active
+    /// one, so GRANDPA authority set changes are not issued gratuitously.
+    impl<T: Config> pallet_session::SessionManager<T::AccountId> for Pallet<T> {
+        fn new_session(_new_index: SessionIndex) -> Option<Vec<T::AccountId>> {
+            let set = Self::select_validators();
+            let pending = BoundedVec::<T::AccountId, T::MaxValidators>::truncate_from(set.clone());
+            PendingValidators::<T>::put(pending.clone());
+            if set == ActiveValidators::<T>::get().into_inner() {
+                None
+            } else {
+                Some(set)
+            }
+        }
+
+        fn new_session_genesis(_new_index: SessionIndex) -> Option<Vec<T::AccountId>> {
+            let mut set = Self::select_validators();
+            if set.is_empty() {
+                // No stakes yet: fall back to the genesis-declared validators
+                // so a dev chain can still start.
+                set = InitialValidators::<T>::get().into_inner();
+            }
+            let pending = BoundedVec::<T::AccountId, T::MaxValidators>::truncate_from(set.clone());
+            PendingValidators::<T>::put(pending);
+            Some(set)
+        }
+
+        fn start_session(_start_index: SessionIndex) {
+            ActiveValidators::<T>::put(PendingValidators::<T>::get());
+        }
+
+        fn end_session(_end_index: SessionIndex) {
+            // Downtime detection is handled by pallet-im-online offences; no
+            // per-session bookkeeping needed here.
+        }
+    }
+
+    /// `pallet_session::historical::SessionManager`: same selection, carrying
+    /// each validator's bonded stake as the full identification so offences
+    /// (GRANDPA equivocation, im-online unresponsiveness) can be attributed.
+    impl<T: Config> pallet_session::historical::SessionManager<T::AccountId, BalanceOf<T>>
+        for Pallet<T>
+    {
+        fn new_session(new_index: SessionIndex) -> Option<Vec<(T::AccountId, BalanceOf<T>)>> {
+            <Self as pallet_session::SessionManager<T::AccountId>>::new_session(new_index).map(
+                |set| {
+                    set.into_iter()
+                        .map(|who| {
+                            let bonded = Self::bonded(&who);
+                            (who, bonded)
+                        })
+                        .collect()
+                },
+            )
+        }
+
+        fn new_session_genesis(
+            new_index: SessionIndex,
+        ) -> Option<Vec<(T::AccountId, BalanceOf<T>)>> {
+            <Self as pallet_session::SessionManager<T::AccountId>>::new_session_genesis(new_index)
+                .map(|set| {
+                    set.into_iter()
+                        .map(|who| {
+                            let bonded = Self::bonded(&who);
+                            (who, bonded)
+                        })
+                        .collect()
+                })
+        }
+
+        fn start_session(start_index: SessionIndex) {
+            <Self as pallet_session::SessionManager<T::AccountId>>::start_session(start_index)
+        }
+
+        fn end_session(end_index: SessionIndex) {
+            <Self as pallet_session::SessionManager<T::AccountId>>::end_session(end_index)
+        }
+    }
+
+    /// `OnOffenceHandler`: slash `slash_fraction` of each offender's bonded
+    /// stake (burned), chill them, and append a bounded `SlashRecord`.
+    ///
+    /// Wired in the runtime as `pallet_offences::Config::OnOffenceHandler`;
+    /// offences arrive from GRANDPA equivocation reports and im-online
+    /// unresponsiveness reports. `Offender` is
+    /// `pallet_session::historical::IdentificationTuple` = `(AccountId, stake)`.
+    impl<T: Config> OnOffenceHandler<T::AccountId, (T::AccountId, BalanceOf<T>), Weight> for Pallet<T> {
+        fn on_offence(
+            offenders: &[OffenceDetails<T::AccountId, (T::AccountId, BalanceOf<T>)>],
+            slash_fraction: &[Perbill],
+            slash_session: SessionIndex,
+        ) -> Weight {
+            let mut consumed = Weight::zero();
+            let mut add_db_reads_writes = |reads, writes| {
+                consumed += T::DbWeight::get().reads_writes(reads, writes);
+            };
+
+            for (details, fraction) in offenders.iter().zip(slash_fraction.iter()) {
+                let who = &details.offender.0;
+                let bonded = Bonded::<T>::get(who);
+                add_db_reads_writes(1, 0);
+                if bonded.is_zero() {
+                    continue;
+                }
+
+                let amount = fraction.mul_floor(bonded);
+                if !amount.is_zero() {
+                    let _ = T::Currency::burn_held(
+                        &HoldReason::Staking.into(),
+                        who,
+                        amount,
+                        Precision::BestEffort,
+                        Fortitude::Force,
+                    );
+                    let remaining = bonded.saturating_sub(amount);
+                    if remaining.is_zero() {
+                        Bonded::<T>::remove(who);
+                    } else {
+                        Bonded::<T>::insert(who, remaining);
+                    }
+                }
+
+                // Slash and chill: equivocating/unresponsive validators leave
+                // the candidate and active sets.
+                Self::remove_candidate(who);
+                SlashRecords::<T>::mutate(|records| {
+                    if records.is_full() {
+                        records.remove(0);
+                    }
+                    let _ = records.try_push(SlashRecord {
+                        who: who.clone(),
+                        amount,
+                        session_index: slash_session,
+                        block_number: frame_system::Pallet::<T>::block_number(),
+                    });
+                });
+
+                Self::deposit_event(Event::Slashed {
+                    who: who.clone(),
+                    amount,
+                    session_index: slash_session,
+                });
+                add_db_reads_writes(2, 4);
+            }
+            consumed
         }
     }
 }
 
-/// Default weight info for the pallet
+/// Weight info for the pallet's extrinsics.
+///
+/// TODO: placeholder weights — benchmark before any public network claim.
 pub trait WeightInfo {
-    fn submit_block() -> Weight;
-    fn stake() -> Weight;
-    fn unstake() -> Weight;
-    fn validate_block() -> Weight;
-    fn report_misbehavior() -> Weight;
-    fn register_pqc_key() -> Weight;
+    /// Weight of `bond`.
+    fn bond() -> Weight;
+    /// Weight of `bond_extra`.
+    fn bond_extra() -> Weight;
+    /// Weight of `unbond`.
+    fn unbond() -> Weight;
+    /// Weight of `withdraw_unbonded`.
+    fn withdraw_unbonded() -> Weight;
+    /// Weight of `validate`.
+    fn validate() -> Weight;
+    /// Weight of `chill`.
+    fn chill() -> Weight;
 }
 
-/// Default implementation of WeightInfo
+/// Placeholder `WeightInfo` (TODO: replace with generated benchmarks).
 impl WeightInfo for () {
-    fn submit_block() -> Weight {
+    fn bond() -> Weight {
         Weight::from_parts(10_000, 0)
     }
-    fn stake() -> Weight {
+    fn bond_extra() -> Weight {
         Weight::from_parts(10_000, 0)
     }
-    fn unstake() -> Weight {
+    fn unbond() -> Weight {
         Weight::from_parts(10_000, 0)
     }
-    fn validate_block() -> Weight {
+    fn withdraw_unbonded() -> Weight {
         Weight::from_parts(10_000, 0)
     }
-    fn report_misbehavior() -> Weight {
+    fn validate() -> Weight {
         Weight::from_parts(10_000, 0)
     }
-    fn register_pqc_key() -> Weight {
+    fn chill() -> Weight {
         Weight::from_parts(10_000, 0)
     }
 }
