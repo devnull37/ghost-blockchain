@@ -1,0 +1,49 @@
+# cargo-deny configuration for the Ghost tree.
+# cargo-audit (rustsec advisories) runs in a sibling CI job; this file adds
+# license, ban, duplicate-version, and source controls on top.
+
+[graph]
+all-features = false
+
+[licenses]
+# Permissive set covering the Substrate/Polkadot dependency tree plus the
+# crates we added. Additions must be justified in the PR that adds them —
+# never loosen this list to silence a new dependency.
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "MPL-2.0",
+    "OpenSSL",
+    "Unicode-DFS-2016",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+
+[bans]
+# Substrate pulls many legitimate duplicate versions (syn 1/2, semver,
+# etc.) — warn rather than deny until the tree thins out.
+multiple-versions = "warn"
+wildcards = "warn"
+highlight = "all"
+
+[sources]
+# We intentionally depend on the polkadot-sdk monorepo over git (stable2407
+# branch pin in Cargo.toml) — allow that org's repos only; everything else
+# must come from crates.io.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-git = [
+    "https://github.com/paritytech/polkadot-sdk.git",
+    "https://github.com/paritytech/polkadot-sdk",
+]
+
+[advisories]
+# cargo audit covers the same DB in CI; keep this in sync as a second gate.
+db-fetch = false
