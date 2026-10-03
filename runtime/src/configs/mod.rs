@@ -299,12 +299,6 @@ impl pallet_sudo::Config for Runtime {
     type WeightInfo = pallet_sudo::weights::SubstrateWeight<Runtime>;
 }
 
-/// Configure the pallet-template in pallets/template.
-impl pallet_template::Config for Runtime {
-    type RuntimeEvent = RuntimeEvent;
-    type WeightInfo = pallet_template::weights::SubstrateWeight<Runtime>;
-}
-
 /// Configure the Ghost Consensus pallet (v2): staking holds, session
 /// selection, difficulty retarget, digest-decoded rewards, offence slashing.
 impl pallet_ghost_consensus::Config for Runtime {

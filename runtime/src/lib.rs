@@ -69,7 +69,9 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
     //   `spec_version`, and `authoring_version` are the same between Wasm and native.
     // This value is set to 100 to notify Polkadot-JS App (https://polkadot.js.org/apps) to use
     //   the compatible custom types.
-    spec_version: 101,
+    // 102: pallet-template removed from the runtime; pallet-ghost-pqc
+    // composed at index 14.
+    spec_version: 102,
     impl_version: 1,
     apis: apis::RUNTIME_API_VERSIONS,
     transaction_version: 1,
@@ -213,9 +215,9 @@ mod runtime {
     #[runtime::pallet_index(6)]
     pub type Sudo = pallet_sudo;
 
-    // Include the custom logic from the pallet-template in the runtime.
-    #[runtime::pallet_index(7)]
-    pub type Template = pallet_template;
+    // Index 7 is retired: it used to hold the template demo pallet, removed
+    // from the runtime. Do not reuse it — a new pallet there would collide
+    // with any chain history that still has the old index.
 
     // Include the Ghost Consensus pallet. It must come before Session so
     // genesis stakes/candidates exist when session genesis selects the

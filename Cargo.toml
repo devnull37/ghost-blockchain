@@ -117,7 +117,6 @@ ml-dsa = { version = "0.1", default-features = false }
 proptest = { version = "1.5", default-features = false, features = ["std", "alloc"] }
 
 # Local dependencies
-pallet-template = { path = "pallets/template", default-features = false }
 pallet-ghost-consensus = { path = "pallets/pallet-ghost-consensus" }
 pallet-ghost-pqc = { path = "pallets/pallet-ghost-pqc" }
 ghost-pow-primitives = { path = "primitives/ghost-pow", default-features = false }
