@@ -238,4 +238,9 @@ mod runtime {
 
     #[runtime::pallet_index(13)]
     pub type ImOnline = pallet_im_online;
+
+    // ML-DSA-87 validator key registry; consulted by GhostConsensus::validate
+    // through `PqcProvider` once `RequirePqcKey` is set.
+    #[runtime::pallet_index(14)]
+    pub type GhostPqc = pallet_ghost_pqc;
 }

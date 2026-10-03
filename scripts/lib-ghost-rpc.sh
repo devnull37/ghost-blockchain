@@ -215,6 +215,13 @@ elif cmd == "storage_key":
     print(storage_key(sys.argv[2], sys.argv[3]))
 elif cmd == "account_key":
     print(system_account_key(sys.argv[2]))
+elif cmd == "map_key":
+    # map_key <pallet> <item> <key-hex-no-0x> — StorageMap entry key:
+    # twox128(pallet) ++ twox128(item) ++ xxh64(key)LE ++ key
+    # (Twox64Concat hasher — the default for FRAME StorageMap keys).
+    pallet, item, key = sys.argv[2], sys.argv[3], unhex(sys.argv[4])
+    h = xxh64(key, 0).to_bytes(8, "little")
+    print("0x" + (twox128(pallet) + twox128(item) + h + key).hex())
 elif cmd == "account_free":
     print(account_free(sys.argv[2]))
 elif cmd == "u256le":

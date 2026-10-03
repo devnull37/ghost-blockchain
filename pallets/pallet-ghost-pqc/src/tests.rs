@@ -242,6 +242,31 @@ fn attest_requires_registered_key() {
 }
 
 #[test]
+fn attest_requires_bonded_validator() {
+    new_test_ext().execute_with(|| {
+        System::set_block_number(1);
+        let sk = keypair(7);
+        // NOT_BONDED holds a valid key + signature but is not a bonded
+        // validator per the mock's provider.
+        let who = NOT_BONDED;
+        assert_ok!(GhostPqc::register_pqc_key(
+            RuntimeOrigin::signed(who.clone()),
+            pk_of(&sk),
+            pop_for(&sk, &who),
+        ));
+        let sig = sk
+            .sign(H256::repeat_byte(0xaa).as_bytes())
+            .encode()
+            .as_slice()
+            .to_vec();
+        assert_noop!(
+            GhostPqc::pqc_attest(RuntimeOrigin::signed(who), H256::repeat_byte(0xaa), sig),
+            Error::<Test>::NotBondedValidator
+        );
+    });
+}
+
+#[test]
 fn attest_rejects_invalid_signature() {
     new_test_ext().execute_with(|| {
         System::set_block_number(1);

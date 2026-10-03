@@ -72,6 +72,20 @@ pub trait PqcKeyProvider<AccountId> {
     fn pqc_key(who: &AccountId) -> Option<PqcPublicKey>;
 }
 
+/// Lookup surface in the other direction: whether `who` is a bonded validator
+/// candidate, per the consensus pallet's staking state. Implemented in the
+/// runtime via an adapter on `pallet-ghost-consensus`.
+pub trait BondedValidatorProvider<AccountId> {
+    /// Returns `true` if `who` holds at least the minimum validator bond.
+    fn is_bonded_validator(who: &AccountId) -> bool;
+}
+
+impl<AccountId> BondedValidatorProvider<AccountId> for () {
+    fn is_bonded_validator(_who: &AccountId) -> bool {
+        false
+    }
+}
+
 #[frame_support::pallet]
 pub mod pallet {
     use super::*;
@@ -85,6 +99,11 @@ pub mod pallet {
 
         /// Weight information for extrinsics.
         type WeightInfo: WeightInfo;
+
+        /// Whether `pqc_attest` is restricted to bonded validators (per design
+        /// doc section 8). `()` denies everyone — wire the consensus pallet's
+        /// bonded-stake lookup in the runtime.
+        type BondedValidators: BondedValidatorProvider<Self::AccountId>;
     }
 
     #[pallet::pallet]
@@ -131,6 +150,8 @@ pub mod pallet {
         KeyNotRegistered,
         /// The submitted public key exceeds `MaxPqcKeySize`.
         KeyTooLarge,
+        /// `pqc_attest` requires a bonded validator (`T::BondedValidators`).
+        NotBondedValidator,
     }
 
     #[pallet::call]
@@ -198,12 +219,9 @@ pub mod pallet {
 
         /// Attest a block hash with the signed origin's registered key.
         ///
-        /// Per design doc section 8 the signer must be a bonded validator; the
-        /// candidate/bond check lives in `pallet-ghost-consensus` and is not wired
-        /// yet, so v1 gates on holding a registered key only.
-        /// TODO(validator-gate): add a `BondedValidatorProvider` config bound and
-        /// enforce bonded-validator status once the consensus pallet exposes it.
-        /// Attestations are informational; they do not gate finality.
+        /// Per design doc section 8 the signer must be a bonded validator
+        /// (`T::BondedValidators`). Attestations are informational; they do
+        /// not gate finality.
         #[pallet::call_index(2)]
         #[pallet::weight(<T as Config>::WeightInfo::pqc_attest())]
         pub fn pqc_attest(
@@ -214,6 +232,10 @@ pub mod pallet {
             let who = ensure_signed(origin)?;
 
             let key = PqcKeys::<T>::get(&who).ok_or(Error::<T>::KeyNotRegistered)?;
+            ensure!(
+                T::BondedValidators::is_bonded_validator(&who),
+                Error::<T>::NotBondedValidator
+            );
 
             ensure!(
                 Self::verify_signature(block_hash.as_ref(), &signature, &key),

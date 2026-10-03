@@ -66,6 +66,7 @@ pallet-template = { workspace = true, default-features = false }
 
 # Ghost Consensus pallet
 pallet-ghost-consensus = { path = "../pallets/pallet-ghost-consensus", default-features = false }
+pallet-ghost-pqc = { path = "../pallets/pallet-ghost-pqc", default-features = false }
 
 # Ghost PoW primitives (GhostPowApi runtime api + POW_ENGINE_ID)
 ghost-pow-primitives = { workspace = true, default-features = false }
@@ -83,6 +84,7 @@ runtime-benchmarks = [
     "frame-system/runtime-benchmarks",
     "pallet-balances/runtime-benchmarks",
     "pallet-ghost-consensus/runtime-benchmarks",
+    "pallet-ghost-pqc/runtime-benchmarks",
     "pallet-grandpa/runtime-benchmarks",
     "pallet-sudo/runtime-benchmarks",
     "pallet-template/runtime-benchmarks",
@@ -108,6 +110,7 @@ std = [
     "pallet-transaction-payment/std",
     "pallet-transaction-payment-rpc-runtime-api/std",
     "pallet-ghost-consensus/std",
+    "pallet-ghost-pqc/std",
     "ghost-pow-primitives/std",
     "sp-core/std",
     "sp-runtime/std",

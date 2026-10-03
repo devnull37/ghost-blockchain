@@ -26,6 +26,7 @@
 // Substrate and Polkadot dependencies
 use frame_support::{
     derive_impl, parameter_types,
+    pallet_prelude::BoundedVec,
     traits::{
         ConstBool, ConstU128, ConstU32, ConstU64, ConstU8, KeyOwnerProofSystem, VariantCountOf,
     },
@@ -48,8 +49,8 @@ use sp_version::RuntimeVersion;
 
 // Local module imports
 use super::{
-    AccountId, Balance, Balances, Block, BlockNumber, GhostConsensus, Hash, Historical, ImOnline,
-    Nonce, Offences, PalletInfo, Runtime, RuntimeCall, RuntimeEvent, RuntimeFreezeReason,
+    AccountId, Balance, Balances, Block, BlockNumber, GhostConsensus, GhostPqc, Hash, Historical,
+    ImOnline, Nonce, Offences, PalletInfo, Runtime, RuntimeCall, RuntimeEvent, RuntimeFreezeReason,
     RuntimeHoldReason, RuntimeOrigin, RuntimeTask, SessionKeys, Signature, System, DAYS,
     EXISTENTIAL_DEPOSIT, SLOT_DURATION, UNIT, VERSION,
 };
@@ -324,8 +325,40 @@ impl pallet_ghost_consensus::Config for Runtime {
     type TargetBlockTimeMs = ConstU64<SLOT_DURATION>;
     type MinDifficulty = MinDifficulty;
     type SessionKeysLookup = SessionKeysLookup;
-    /// () until pallet-ghost-pqc lands; RequirePqcKey stays false until then
-    /// (no_std PQC verification per AGENTS.md).
-    type PqcProvider = ();
-    type RequirePqcKey = ConstBool<false>;
+    /// The GhostPqc pallet's registry, reached through the consensus pallet's
+    /// provider trait (adapter below — the two pallets define identically
+    /// shaped traits deliberately to stay decoupled).
+    type PqcProvider = PqcKeyAdapter;
+    /// Validators must hold a registered ML-DSA-87 key to `validate()`.
+    /// Genesis stakers are seeded directly and unaffected.
+    type RequirePqcKey = ConstBool<true>;
+}
+
+/// Adapt `pallet_ghost_pqc::PqcKeyProvider` onto
+/// `pallet_ghost_consensus::PqcKeyProvider` — same contract, separate traits.
+pub struct PqcKeyAdapter;
+impl pallet_ghost_consensus::PqcKeyProvider<AccountId> for PqcKeyAdapter {
+    fn has_pqc_key(who: &AccountId) -> bool {
+        <GhostPqc as pallet_ghost_pqc::PqcKeyProvider<AccountId>>::has_pqc_key(who)
+    }
+    fn pqc_key(
+        who: &AccountId,
+    ) -> Option<BoundedVec<u8, ConstU32<{ pallet_ghost_consensus::MAX_PQC_KEY_SIZE }>>> {
+        <GhostPqc as pallet_ghost_pqc::PqcKeyProvider<AccountId>>::pqc_key(who)
+    }
+}
+
+/// Bonded-validator lookup for `pqc_attest` gating: at least `MinStake`
+/// bonded in the consensus pallet.
+pub struct BondedValidatorAdapter;
+impl pallet_ghost_pqc::BondedValidatorProvider<AccountId> for BondedValidatorAdapter {
+    fn is_bonded_validator(who: &AccountId) -> bool {
+        GhostConsensus::bonded(who) >= UNIT
+    }
+}
+
+impl pallet_ghost_pqc::Config for Runtime {
+    type RuntimeEvent = RuntimeEvent;
+    type WeightInfo = pallet_ghost_pqc::weights::SubstrateWeight<Runtime>;
+    type BondedValidators = BondedValidatorAdapter;
 }

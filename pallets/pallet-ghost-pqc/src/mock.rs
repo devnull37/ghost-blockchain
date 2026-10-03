@@ -20,9 +20,22 @@ impl frame_system::Config for Test {
     type Lookup = sp_runtime::traits::IdentityLookup<Self::AccountId>;
 }
 
+/// Mock bonded-validator lookup: everyone is bonded except `NOT_BONDED`,
+/// letting tests cover both branches of the `pqc_attest` gate.
+pub const NOT_BONDED: sp_core::crypto::AccountId32 =
+    sp_core::crypto::AccountId32::new([0xEE; 32]);
+
+pub struct TestBonded;
+impl crate::BondedValidatorProvider<sp_core::crypto::AccountId32> for TestBonded {
+    fn is_bonded_validator(who: &sp_core::crypto::AccountId32) -> bool {
+        *who != NOT_BONDED
+    }
+}
+
 impl pallet_ghost_pqc::Config for Test {
     type RuntimeEvent = RuntimeEvent;
     type WeightInfo = ();
+    type BondedValidators = TestBonded;
 }
 
 /// Build test externalities with an empty registry.

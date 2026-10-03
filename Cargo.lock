@@ -8412,6 +8412,7 @@ dependencies = [
  "pallet-authorship",
  "pallet-balances",
  "pallet-ghost-consensus",
+ "pallet-ghost-pqc",
  "pallet-grandpa",
  "pallet-im-online",
  "pallet-offences",

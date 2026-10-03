@@ -660,6 +660,11 @@ pub mod pallet {
                 .into_iter()
                 .map(|who| (who.clone(), Self::bonded(&who)))
                 .filter(|(_, bonded)| *bonded >= T::MinStake::get())
+                .filter(|(who, _)| {
+                    // Re-checked at selection: `revoke_pqc_key` must not let a
+                    // seated validator keep their seat after shedding the key.
+                    !T::RequirePqcKey::get() || T::PqcProvider::has_pqc_key(who)
+                })
                 .collect();
             scored.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
             scored.truncate(T::MaxValidators::get() as usize);
