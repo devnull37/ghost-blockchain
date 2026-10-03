@@ -216,11 +216,19 @@ elif cmd == "storage_key":
 elif cmd == "account_key":
     print(system_account_key(sys.argv[2]))
 elif cmd == "map_key":
-    # map_key <pallet> <item> <key-hex-no-0x> — StorageMap entry key:
-    # twox128(pallet) ++ twox128(item) ++ xxh64(key)LE ++ key
-    # (Twox64Concat hasher — the default for FRAME StorageMap keys).
-    pallet, item, key = sys.argv[2], sys.argv[3], unhex(sys.argv[4])
-    h = xxh64(key, 0).to_bytes(8, "little")
+    # map_key <pallet> <item> <key-hex-no-0x> [hasher] — StorageMap entry key.
+    # hasher defaults to Blake2_128Concat (what FRAME uses for AccountId
+    # maps in this workspace, e.g. GhostConsensus::Bonded):
+    #   twox128(pallet) ++ twox128(item) ++ blake2_128(key) ++ key
+    # Pass "twox64concat" explicitly for Twox64Concat maps instead:
+    #   twox128(pallet) ++ twox128(item) ++ xxh64(key)LE ++ key
+    pallet, item = sys.argv[2], sys.argv[3]
+    key = unhex(sys.argv[4])
+    hasher = sys.argv[5] if len(sys.argv) > 5 else "blake2_128concat"
+    if hasher == "twox64concat":
+        h = xxh64(key, 0).to_bytes(8, "little")
+    else:
+        h = hashlib.blake2b(key, digest_size=16).digest()
     print("0x" + (twox128(pallet) + twox128(item) + h + key).hex())
 elif cmd == "account_free":
     print(account_free(sys.argv[2]))
