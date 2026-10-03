@@ -106,7 +106,7 @@ else
 fi
 "$EVIL_BIN" --version
 
-echo "==> honest network up (alice committee+miner, miner1 keyless)"
+echo "==> honest network up (alice committee+miner, bob committee+miner)"
 start "$TMP_DIR/a.log" "$BIN" \
 	--chain local --alice --validator $NODE_MEM_ARGS \
 	--mine --mining-threads "$MINING_THREADS" --miner-coinbase "$ALICE_SS58" \
@@ -116,7 +116,8 @@ A_PID=$LAST_PID
 wait_rpc "$A_RPC"
 
 start "$TMP_DIR/m.log" "$BIN" \
-	--chain local --mine --mining-threads "$MINING_THREADS" $NODE_MEM_ARGS \
+	--chain local --bob --validator \
+	--mine --mining-threads "$MINING_THREADS" $NODE_MEM_ARGS \
 	--miner-coinbase "$CHARLIE_SS58" \
 	--base-path "$TMP_DIR/m" --node-key "$M_KEY" \
 	--port "$M_PORT" --rpc-port "$M_RPC" \
@@ -165,6 +166,18 @@ honest_total=$(wc -l < "$TMP_DIR/honest-headers.txt")
 echo "scanned $honest_total honest headers: zero forged blocks imported"
 
 # Sanity: honest chain is still healthy alongside the attack.
+# Second honest node (bob, committee) must show the same: no forged
+# headers imported even though it is peering the evil node directly.
+scan_pow_headers "$M_RPC" 1 "$(best_number "$M_RPC")" >"$TMP_DIR/honest-headers-b.txt"
+if grep -q " $EVE_ACCT " "$TMP_DIR/honest-headers-b.txt"; then
+	echo "FORGED SEAL IMPORTED on bob — consensus breach" >&2
+	grep " $EVE_ACCT " "$TMP_DIR/honest-headers-b.txt" >&2
+	exit 1
+fi
+echo "scanned $(wc -l < "$TMP_DIR/honest-headers-b.txt") bob headers: zero forged blocks imported"
+
+# Sanity: honest chain is still healthy alongside the attack — the full
+# {alice,bob} committee is up, so finality must keep advancing.
 fin="$(finalized_number "$A_RPC")"
 [ "$fin" -ge 1 ] || { echo "finality never advanced on honest node" >&2; exit 1; }
 echo "finalized=$fin — honest chain healthy under forged-seal spam"
