@@ -117,6 +117,17 @@ from `max(wall_clock, parent_now + MinimumPeriod)` clamped at
 the drift cap, or bound how far `Now` can lead wall time in the
 inherent provider.
 
+**FIXED post-merge (commit `41abc2d`):** `MinimumPeriod` is now 1ms —
+PoW has no slot to protect, so `Now` tracks miners' wall-clock
+timestamps instead of ratcheting to the drift cap. Validated with the
+same 300s quick soak on `devin/integration`: TooFarInFuture rejects
+**90 → 0** (alice 33→0, bob 31→0, miner1 26→0); blocks produced
+**125 → 410** in the same window (~0.7s/block effective — the seal
+waste had been suppressing the rate ~3.3×); seals ≈ canonical authored
+(151/149, 141/140, 120/120, near-zero wasted work); finality lag avg
+3.4; both miner1 kill/restart cycles recovered. The remaining ~24
+"Unable to import" lines are non-timestamp PoW races, not this bug.
+
 ### Adaptive stall limits are required for a PoW chain
 
 The spec's fixed `3 × target block time` stall limit (15s) would
