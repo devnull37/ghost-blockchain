@@ -67,6 +67,15 @@ echo "== booting dev node (port $PORT) =="
 NODE_PID=$!
 wait_rpc "$RPCPORT" 120
 
+# The drill upgrades to CUR_SPEC+1 — only valid if the node's embedded wasm
+# matches the source tree. A binary built while a prior drill had spec
+# bumped carries the wrong spec and the drill would no-op.
+LIVE_SPEC=$(rpc "$RPCPORT" state_getRuntimeVersion '[]' | json_field "data['result']['specVersion']")
+if [ "$LIVE_SPEC" != "$CUR_SPEC" ]; then
+    echo "FAIL: live spec $LIVE_SPEC != source spec $CUR_SPEC — ghost-node binary is stale (built against a different spec_version). Rebuild: cargo build --bin ghost-node"
+    exit 1
+fi
+
 # ── 3. Drill ───────────────────────────────────────────────────────────
 cd "$HERE/upgrade-drill"
 [ -d node_modules/@polkadot/api ] || npm install --no-audit --no-fund @polkadot/api >/dev/null
