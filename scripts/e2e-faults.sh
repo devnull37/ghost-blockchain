@@ -325,10 +325,14 @@ start_node "$TMP_DIR/c-bob.log" \
 	--port "$BOB_PORT" --rpc-port "$BOB_RPC" \
 	--bootnodes "/ip4/127.0.0.1/tcp/$A1_PORT/p2p/$A1_PEER"
 BOB_PID=$LAST_PID
+wait_rpc "$BOB_RPC"
 
 # The attacker: a SECOND node holding Alice's keys. Same --alice keystore on
 # a separate base path -> both broadcast Alice-signed GRANDPA votes, and any
 # divergence in what they vote on is a same-authority equivocation.
+# (A dedicated non-validating miner was dropped to keep the scenario inside
+# small-box memory: alice1 already authors blocks, and bob — the honest
+# committee member — is the cleanest place to observe the slash landing.)
 start_node "$TMP_DIR/c-alice2.log" \
 	--chain local --alice --validator \
 	--base-path "$TMP_DIR/c-alice2" \
@@ -336,16 +340,7 @@ start_node "$TMP_DIR/c-alice2.log" \
 	--port "$A2_PORT" --rpc-port "$A2_RPC" \
 	--bootnodes "/ip4/127.0.0.1/tcp/$A1_PORT/p2p/$A1_PEER"
 ALICE2_PID=$LAST_PID
-
-start_node "$TMP_DIR/c-miner1.log" \
-	--chain local \
-	--mine --mining-threads "$MINING_THREADS" --miner-coinbase "$CHARLIE_SS58" \
-	--base-path "$TMP_DIR/c-miner1" \
-	--node-key "$M1_KEY" \
-	--port "$M1_PORT" --rpc-port "$M1_RPC" \
-	--bootnodes "/ip4/127.0.0.1/tcp/$A1_PORT/p2p/$A1_PEER"
-M1_PID=$LAST_PID
-wait_rpc "$M1_RPC"
+wait_rpc "$A2_RPC"
 
 bond_before="$(gc_bonded "$A1_RPC" "$ALICE_ACCT")"
 echo "alice bonded before equivocation lands: $bond_before (expect $GENESIS_BOND)"
@@ -354,8 +349,8 @@ EQUIV_TIMEOUT="${EQUIV_TIMEOUT:-360}"
 deadline=$((SECONDS + EQUIV_TIMEOUT))
 slash_seen=0
 while [ $SECONDS -lt $deadline ]; do
-	recs="$(gc_storage "$M1_RPC" SlashRecords)"
-	bond_now="$(gc_bonded "$M1_RPC" "$ALICE_ACCT")"
+	recs="$(gc_storage "$BOB_RPC" SlashRecords)"
+	bond_now="$(gc_bonded "$BOB_RPC" "$ALICE_ACCT")"
 	if gc_vec_nonempty "$recs" && [ "$bond_now" -lt "$bond_before" ]; then
 		slash_seen=1
 		break
@@ -365,8 +360,8 @@ done
 
 if [ "$slash_seen" != "1" ]; then
 	echo "no slash observed within ${EQUIV_TIMEOUT}s" >&2
-	echo "last SlashRecords: $(gc_storage "$M1_RPC" SlashRecords)" >&2
-	echo "alice Bonded now: $(gc_bonded "$M1_RPC" "$ALICE_ACCT")" >&2
+	echo "last SlashRecords: $(gc_storage "$BOB_RPC" SlashRecords)" >&2
+	echo "alice Bonded now: $(gc_bonded "$BOB_RPC" "$ALICE_ACCT")" >&2
 	echo "equivocation evidence in logs:" >&2
 	grep -i "equivoc\|offence\|offense" "$TMP_DIR"/c-*.log | tail -15 >&2 || true
 	diag_log "$TMP_DIR/c-bob.log" 40
