@@ -38,7 +38,10 @@ votes (⌈2N/3⌉ = 2).
 **Expected:** PoW best keeps advancing (mining is committee-independent);
 finality cannot move past genesis. Bob joins → finality resumes.
 
-**Observed:** _pending first full run_
+**Observed:** with Bob absent, best advanced to 5 while finalized stayed
+pinned at 0 — PoW liveness independent of the committee, exactly as
+designed. Bob joined and the committee completed a round: finalized went
+0 → 8, catching up to (best − 2).
 
 ## Scenario C — equivocation → slash
 
@@ -51,7 +54,28 @@ peers' offchain workers auto-submit equivocation reports.
 candidate set at the next selection (deferred removal by design — the
 seated committee is never mutated mid-session). Liveness continues.
 
-**Observed:** _pending first full run_
+**Observed:** over the organic window the duplicated-identity votes stayed
+identical (expected on localhost — same chain view, same targets). The
+gate then submitted a crafted equivocation proof — two Alice-`gran`-signed
+prevotes for one (round, setId) on different targets — through the signed
+`report_equivocation` call on the honest node's RPC. The report was
+included, the offence processed, and on-chain state recorded:
+
+- `SlashRecords` non-empty, containing Alice's account id;
+- `Bonded(Alice)`: `1_000_000_000_000_000` → `0` planck (full offence
+  slash fraction);
+- best head kept advancing during and after (finality continued on the
+  remaining committee — equivocating Alice's votes still count for quorum,
+  which is inherent to N=2).
+
+Two submission-path facts worth recording:
+
+1. `report_equivocation_unsigned` is `TransactionSource::Local`-only — an
+   RPC-submitted unsigned report is rejected at pool admission. Real
+   reporting flows through nodes' own offchain workers; the gate uses the
+   signed call, which performs the same `process_evidence` validation.
+2. The crafted proof is byte-identical to what a live double-signer
+   leaks: the pallet verifies the signatures, not the gossip origin.
 
 ## Known limitations of this gate
 

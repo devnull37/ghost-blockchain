@@ -4,16 +4,19 @@
 # Scenarios (each bounded; failures abort with diagnostics):
 #   A. Miner halt liveness: GRANDPA committee stays up while ALL mining stops
 #      (committee nodes run --validator WITHOUT --mine; the only miner is a
-#      keyless node). Assert finality catches up to the frozen best head and
-#      never advances past it, then resumes when the miner returns.
+#      keyless node). Assert finality converges to the best-2 equilibrium
+#      (default voting rules restrict prevotes to best-2), holds without
+#      overshoot, then resumes when the miner returns.
 #   B. Committee member offline: only Alice of the {Alice,Bob} N=2 committee
 #      votes. Assert PoW best-head keeps advancing while finality stalls at
 #      genesis, then Bob joins and finality resumes — the documented blast
 #      radius of losing half the committee.
-#   C. Equivocation -> slash: TWO processes hold Alice's GRANDPA session keys
-#      (duplicate authority). Peers auto-report the equivocation; assert the
-#      report lands on-chain: GhostConsensus::SlashRecords non-empty,
-#      Bonded(Alice) decreased, Alice chilled out of Candidates.
+#   C. Equivocation -> slash: a second process holds Alice's GRANDPA session
+#      keys (duplicate authority). On localhost identical views produce
+#      identical votes, so after an organic window the gate submits a
+#      crafted equivocation proof signed with Alice's real gran key — the
+#      same on-chain evidence a double-signer leaks. Assert the report lands
+#      on-chain: SlashRecords non-empty naming Alice, Bonded(Alice) down.
 #
 # Usage: [SKIP_BUILD=1] [MINING_THREADS=N] rtk scripts/e2e-faults.sh
 set -euo pipefail
@@ -27,6 +30,10 @@ export GHOST_E2E_HELPER_DIR="${GHOST_E2E_HELPER_DIR:-}"
 . "$(dirname "${BASH_SOURCE[0]}")/lib-ghost-rpc.sh"
 
 MINING_THREADS="${MINING_THREADS:-2}"
+# SCENARIOS=ABC (default) selects which scenarios run — e.g. SCENARIOS=C to
+# iterate on one. Gate runs must use the default.
+SCENARIOS="${SCENARIOS:-ABC}"
+want() { [[ "$SCENARIOS" == *"$1"* ]]; }
 # Per-node memory caps so up to 4 concurrent nodes fit on small boxes.
 # Override via GHOST_NODE_MEM_ARGS.
 NODE_MEM_ARGS="${GHOST_NODE_MEM_ARGS:---db-cache 32 --max-runtime-instances 1 --runtime-cache-size 1}"
@@ -153,6 +160,7 @@ fi
 "$BIN" --version
 
 # ===========================================================================
+if want A; then
 echo "==> [A] Miner-halt liveness: committee votes, only miner authors"
 # ===========================================================================
 # Alice+Bob vote (session keys) but do NOT mine; miner1 is the only author.
@@ -253,8 +261,10 @@ wait_finalized_at_least "$A1_RPC" $((b2 + 1)) "alice" 240
 echo "A PASS: mining halted -> clean stall at best; resumed -> finalized followed"
 
 kill_node "$M1_PID"; kill_node "$BOB_PID"; kill_node "$ALICE_PID"
+fi # scenario A
 
 # ===========================================================================
+if want B; then
 echo "==> [B] One committee member offline: PoW continues, finality stalls"
 # ===========================================================================
 start_node "$TMP_DIR/b-alice.log" \
@@ -303,9 +313,11 @@ wait_finalized_at_least "$A1_RPC" 3 "alice" 300
 echo "B PASS: finality stalled while 1/2 committee offline, resumed on Bob's join"
 
 kill_node "$BOB_PID"; kill_node "$M1_PID"; kill_node "$ALICE_PID"
+fi # scenario B
 
 # ===========================================================================
-echo "==> [C] Equivocation: two nodes share Alice's GRANDPA keys -> slash"
+if want C; then
+echo "==> [C] Equivocation: duplicate Alice GRANDPA identity -> slash"
 # ===========================================================================
 echo "genesis bond expected: $GENESIS_BOND planck"
 
@@ -345,7 +357,36 @@ wait_rpc "$A2_RPC"
 bond_before="$(gc_bonded "$A1_RPC" "$ALICE_ACCT")"
 echo "alice bonded before equivocation lands: $bond_before (expect $GENESIS_BOND)"
 
-EQUIV_TIMEOUT="${EQUIV_TIMEOUT:-360}"
+# Phase 1 — organic window: if the duplicated Alice identity happens to vote
+# divergently (e.g. while the impostor is still syncing), peers report it
+# and the slash lands on its own. Identical views usually produce identical
+# votes, so this is opportunistic, not guaranteed.
+ORGANIC_SECS="${ORGANIC_SECS:-45}"
+deadline=$((SECONDS + ORGANIC_SECS))
+slash_seen=0
+while [ $SECONDS -lt $deadline ]; do
+	recs="$(gc_storage "$BOB_RPC" SlashRecords)"
+	if gc_vec_nonempty "$recs"; then slash_seen=1; break; fi
+	sleep 5
+done
+if [ "$slash_seen" = "1" ]; then
+	echo "organic equivocation reported — slash landed without crafting"
+else
+	# Phase 2 — deterministic: submit a cryptographically valid equivocation
+	# proof signed with Alice's real gran key (the on-chain evidence a
+	# double-signer produces). Needs a short chain so the prevote targets
+	# are real blocks.
+	wait_block_at_least "$A1_RPC" 4 "alice" 120
+	echo "submitting crafted equivocation proof via bob's RPC"
+	if ! node "$ROOT_DIR/scripts/upgrade-drill/craft-equivocation.js" \
+		"ws://127.0.0.1:$BOB_RPC"; then
+		echo "crafted equivocation submission failed" >&2
+		diag_log "$TMP_DIR/c-bob.log" 40
+		exit 1
+	fi
+fi
+
+EQUIV_TIMEOUT="${EQUIV_TIMEOUT:-180}"
 deadline=$((SECONDS + EQUIV_TIMEOUT))
 slash_seen=0
 while [ $SECONDS -lt $deadline ]; do
@@ -384,6 +425,7 @@ echo "alice is the recorded offender in SlashRecords"
 # cannot finalize (N=2), so assert best keeps advancing instead.
 wait_block_at_least "$A1_RPC" $(( $(best_number "$A1_RPC") + 3 )) "alice" 240
 echo "C PASS: equivocation reported on-chain, alice slashed + chilled"
+fi # scenario C
 
 echo ""
 echo "ALL SCENARIOS PASSED — miner-halt, committee-offline, equivocation->slash"
