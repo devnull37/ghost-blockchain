@@ -69,7 +69,13 @@ ghost-consensus = { workspace = true }
 solochain-template-runtime = { workspace = true }
 
 [features]
-runtime-benchmarks = ["solochain-template-runtime/runtime-benchmarks"]
+runtime-benchmarks = [
+    "frame-benchmarking-cli/runtime-benchmarks",
+    "frame-system/runtime-benchmarks",
+    "sc-service/runtime-benchmarks",
+    "solochain-template-runtime/runtime-benchmarks",
+    "sp-runtime/runtime-benchmarks",
+]
 
 [build-dependencies]
 substrate-build-script-utils = { workspace = true, default-features = true }
