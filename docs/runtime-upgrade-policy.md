@@ -4,7 +4,7 @@
 
 | Field | Rule | Current |
 |---|---|---|
-| `spec_version` | **Bump on every change to the runtime's logic or metadata** — pallet set, call order, storage layout, Config types, consensus constants. This is what `CheckSpecVersion` and native-vs-Wasm matching key on. | 102 |
+| `spec_version` | **Bump on every change to the runtime's logic or metadata** — pallet set, call order, storage layout, Config types, consensus constants. This is what `CheckSpecVersion` and native-vs-Wasm matching key on. | 103 |
 | `impl_version` | Bump for implementation-only changes that leave the spec identical — bug fixes in behavior-preserving code, perf changes with no semantics delta. When in doubt, bump `spec_version` instead. | 1 |
 | `transaction_version` | Bump when an extrinsic's *encoding* changes in a way that breaks previously-signed payloads (signature payload layout). Rare. | 1 |
 | `authoring_version` | Bump when the block-authoring interface changes (seal format, digest layout) such that old authors cannot produce valid blocks. | 1 |
@@ -35,6 +35,16 @@ check the diff manually until an automated metadata-diff gate exists.
    (`ghost-node` embeds it; extract via `build-spec` or the build output).
 3. Submit `system.set_code` — currently via sudo (testnet-only; sudo is not
    a production-preset feature).
+
+   **polkadot-js encoding hazard (observed in the upgrade drill):** pass the
+   wasm as a hex string — `api.tx.system.setCode(u8aToHex(code))` — never a
+   raw `Buffer`/`Uint8Array`. The installed `@polkadot/types` treats a u8a
+   `Bytes` arg as already-SCALE-encoded, so a wasm blob (magic starts
+   `0x00`) encodes as an EMPTY vec: the chain stores a zero-length `:code`
+   and wedges permanently (`UnexpectedEof` on every executor call; a node
+   cannot even boot on that db — rollback is impossible because the
+   runtime needed to submit the fix is the corrupt one). Verify the
+   submitted extrinsic length matches the wasm size before broadcasting.
 4. Verify post-upgrade: `state_getRuntimeVersion` shows the new
    `spec_version`; blocks keep being authored/finalized; run
    `e2e-ghost.sh` against a node that *upgraded* rather than restarted
