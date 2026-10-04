@@ -18,7 +18,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 source "$HERE/lib-ghost-rpc.sh"
 
-BASE="$(mktemp -d "${TMPDIR:-/tmp}/ghost-upgrade-XXXX")"
+BASE="$(mktemp -d "${TMPDIR:-/tmp}/ghost-upgrade-XXXXXX")"
 PORT=29970
 RPCPORT=29971
 PROMPORT=31461
@@ -59,7 +59,7 @@ trap cleanup EXIT
 }
 
 echo "== booting dev node (port $PORT) =="
-"$BIN" --dev --tmp -d "$BASE" \
+"$BIN" --dev -d "$BASE" \
     --mine --miner-coinbase d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d \
     --rpc-port "$RPCPORT" --port "$PORT" --prometheus-port "$PROMPORT" \
     --rpc-methods Unsafe \
