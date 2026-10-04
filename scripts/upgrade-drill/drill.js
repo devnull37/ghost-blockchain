@@ -4,6 +4,7 @@
 // Submits sudo(system.set_code(wasm)) as //Alice, waits for inclusion,
 // then asserts: spec_version bumped, blocks keep producing + finalizing.
 const { ApiPromise, WsProvider, Keyring } = require("@polkadot/api");
+const { u8aToHex } = require("@polkadot/util");
 const fs = require("fs");
 
 const WS = process.argv[2];
@@ -31,7 +32,12 @@ async function main() {
   const keyring = new Keyring({ type: "sr25519" });
   const alice = keyring.addFromUri("//Alice");
 
-  const inner = api.tx.system.setCode(code);
+  // Pass the wasm as a hex string, not a Buffer/Uint8Array: this version of
+  // @polkadot/types decodes a u8a arg as already-SCALE-encoded, so a wasm
+  // blob starting with 0x00 decodes to an EMPTY vec — the on-chain :code
+  // ends up zero-length and the chain wedges with UnexpectedEof. Verified
+  // empirically: hex arg -> full 1.7MB code stored; u8a arg -> 0 bytes.
+  const inner = api.tx.system.setCode(u8aToHex(code));
   const call = api.tx.sudo.sudo(inner);
 
   await new Promise((resolve, reject) => {
