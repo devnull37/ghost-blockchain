@@ -64,6 +64,17 @@ Do not schedule a public testnet until all of the following are true:
    finality reached 14 during the attack window.)*
 8. `scripts/e2e-upgrade.sh` passes: a Wasm→Wasm `sudo set_code` upgrade
    lands on a live chain and finality continues on the new spec_version.
+   *(Passed on spec-103 — full 1.73 MB runtime submitted as
+   `sudo(system.set_code)` applied spec 103→104 in-block, best and
+   finalized heads advanced on the new runtime, `GhostConsensus` storage
+   version still 2. Operational hazard found and fixed in the drill: the
+   installed @polkadot/types decodes a `Uint8Array`/`Buffer` `Bytes` arg
+   as already-SCALE-encoded, so a wasm blob starting with `0x00` encodes
+   as an EMPTY vec — `:code` stored zero-length wedges the chain
+   (`UnexpectedEof`, nodes cannot even boot on that db). Always pass the
+   wasm as a hex string — `api.tx.system.setCode(u8aToHex(code))` — and
+   `e2e-upgrade.sh` now refuses to run against a node binary whose
+   embedded spec doesn't match `runtime/src/lib.rs`.)*
 9. `scripts/soak-ghost.sh` completes a ≥30-min multi-node soak with no
    invariant violations (finality advance, bounded head spread, ≥1 peer,
    no finalized forks) — see `docs/soak-report.md`.
