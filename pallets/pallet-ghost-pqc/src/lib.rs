@@ -86,6 +86,21 @@ impl<AccountId> BondedValidatorProvider<AccountId> for () {
     }
 }
 
+/// Runtime-benchmark seeding hook: `pqc_attest` requires a bonded
+/// validator, and the benchmark can't conjure a bond in another pallet
+/// without a helper written against the concrete runtime. Mocks use `()`.
+#[cfg(feature = "runtime-benchmarks")]
+pub trait PqcBenchmarkHelper<AccountId> {
+    /// Arrange state so `T::BondedValidators::is_bonded_validator(who)` is
+    /// true for the upcoming `pqc_attest` call.
+    fn seed_bonded_validator(who: &AccountId);
+}
+
+#[cfg(feature = "runtime-benchmarks")]
+impl<AccountId> PqcBenchmarkHelper<AccountId> for () {
+    fn seed_bonded_validator(_who: &AccountId) {}
+}
+
 #[frame_support::pallet]
 pub mod pallet {
     use super::*;
@@ -104,6 +119,10 @@ pub mod pallet {
         /// doc section 8). `()` denies everyone — wire the consensus pallet's
         /// bonded-stake lookup in the runtime.
         type BondedValidators: BondedValidatorProvider<Self::AccountId>;
+
+        /// Benchmark-only seeding for the bonded-validator gate.
+        #[cfg(feature = "runtime-benchmarks")]
+        type BenchmarkHelper: PqcBenchmarkHelper<Self::AccountId>;
     }
 
     /// On-chain storage version — always stamped (genesis writes it), so a

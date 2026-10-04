@@ -278,7 +278,7 @@ risk. **[partially mitigated]**
 | No session committee / offences / equivocation path | §4.6–4.7 | P0 committee + slashing |
 | Unbounded iteration + extrinsic slashing in prototype pallet | §4.9 | P0 bounded storage review |
 | Selfish-mining exposure unquantified | §4.3 | P1 threat-model item |
-| PQC weights are placeholders | §4.10 block-weight DoS | P0 benchmarks |
+| ~~PQC weights are placeholders~~ → resolved: CLI-measured weights checked in | §4.10 block-weight DoS | done (`benchmark pallet`, spec-103 tree) |
 | `pqc_attest` lacks domain tag + bonded gate | §4.10 | pallet TODO → P1 |
 | Multi-winning-seal tie-break influence | §4.3, low | noted for audit |
 | Sudo + template pallet in production presets | governance/griefing surface | P1 removal plan |

@@ -25,11 +25,11 @@
 
 // Substrate and Polkadot dependencies
 use frame_support::{
-    derive_impl, parameter_types,
+    derive_impl,
     pallet_prelude::BoundedVec,
+    parameter_types,
     traits::{
-        ConstBool, ConstU128, ConstU32, ConstU64, ConstU8, Get, KeyOwnerProofSystem,
-        VariantCountOf,
+        ConstBool, ConstU128, ConstU32, ConstU64, ConstU8, Get, KeyOwnerProofSystem, VariantCountOf,
     },
     weights::{
         constants::{RocksDbWeight, WEIGHT_REF_TIME_PER_SECOND},
@@ -171,6 +171,14 @@ impl pallet_ghost_consensus::BenchmarkHelper<Runtime> for GhostBenchmarkHelper {
         )
         .expect("zeroed SessionKeys always decode");
         pallet_session::NextKeys::<Runtime>::insert(who, keys);
+        // `validate` also requires a registered PQC key (`RequirePqcKey`):
+        // seed PqcKeys directly — a full ML-DSA registration would only
+        // measure verify, not the gate we actually want worst-case for. The
+        // gate only checks map presence, so key bytes don't matter.
+        pallet_ghost_pqc::PqcKeys::<Runtime>::insert(
+            who,
+            pallet_ghost_pqc::PqcPublicKey::default(),
+        );
     }
 }
 
@@ -349,8 +357,20 @@ impl pallet_ghost_consensus::PqcKeyProvider<AccountId> for PqcKeyAdapter {
 pub struct BondedValidatorAdapter;
 impl pallet_ghost_pqc::BondedValidatorProvider<AccountId> for BondedValidatorAdapter {
     fn is_bonded_validator(who: &AccountId) -> bool {
-        GhostConsensus::bonded(who)
-            >= <Runtime as pallet_ghost_consensus::Config>::MinStake::get()
+        GhostConsensus::bonded(who) >= <Runtime as pallet_ghost_consensus::Config>::MinStake::get()
+    }
+}
+
+/// Benchmark seed for the `pqc_attest` bond gate: give `who` `MinStake` in
+/// the consensus pallet's `Bonded` map (the storage
+/// `BondedValidatorAdapter` actually reads).
+#[cfg(feature = "runtime-benchmarks")]
+pub struct GhostPqcBenchmarkHelper;
+#[cfg(feature = "runtime-benchmarks")]
+impl pallet_ghost_pqc::PqcBenchmarkHelper<AccountId> for GhostPqcBenchmarkHelper {
+    fn seed_bonded_validator(who: &AccountId) {
+        let stake: Balance = <Runtime as pallet_ghost_consensus::Config>::MinStake::get();
+        pallet_ghost_consensus::Bonded::<Runtime>::insert(who, stake);
     }
 }
 
@@ -358,4 +378,6 @@ impl pallet_ghost_pqc::Config for Runtime {
     type RuntimeEvent = RuntimeEvent;
     type WeightInfo = pallet_ghost_pqc::weights::SubstrateWeight<Runtime>;
     type BondedValidators = BondedValidatorAdapter;
+    #[cfg(feature = "runtime-benchmarks")]
+    type BenchmarkHelper = GhostPqcBenchmarkHelper;
 }

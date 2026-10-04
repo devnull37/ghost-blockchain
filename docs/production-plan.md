@@ -16,7 +16,7 @@ Release bar: the standard a top-tier organization would apply before shipping a 
 - [x] Staking: bond/bond_extra/unbond/withdraw_unbonded (holds) + validate/chill + MinStake + bounded unbonding chunks — PR #10
 - [x] Slashing: GRANDPA equivocation → offences → slash + chill incl. unbonding chunks (no unbond-immunity) — PR #10 + #14 (H-1); downtime heartbeats via im-online + PowFindAuthor (H-2)
 - [x] All consensus-relevant storage bounded; no unbounded iteration in any hot path — round-1 cleared the pallet; round-2 signed off all post-round-1 deltas (docs/security-review/round-2.md)
-- [x] Real weights: benchmarks for all 10 extrinsics + checked-in `weights.rs` — PR #15 (regenerate via node CLI pending)
+- [x] Real weights: benchmarks for all 10 extrinsics + checked-in `weights.rs` — PR #15 + CLI-regenerated `weights.rs` (Wasm-measured) on this tree
 
 ### Correctness & safety engineering
 - [x] `cargo test --workspace` green; `cargo fmt --check`; `cargo clippy -- -D warnings` zero warnings — CI green on PR #8; kept green through PR #13/#15

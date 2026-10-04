@@ -588,7 +588,6 @@ pub mod pallet {
         #[pallet::call_index(5)]
         #[pallet::weight(<T as Config>::WeightInfo::chill(
             T::MaxValidatorCandidates::get().saturating_sub(1),
-            T::MaxValidators::get().saturating_sub(1),
         ))]
         pub fn chill(origin: OriginFor<T>) -> DispatchResult {
             let who = ensure_signed(origin)?;
@@ -1007,9 +1006,10 @@ pub trait WeightInfo {
     fn withdraw_unbonded(u: u32) -> Weight;
     /// Weight of `validate`; `c` = candidates already opted in.
     fn validate(c: u32) -> Weight;
-    /// Weight of `chill`; `c` = other candidates retained over,
-    /// `v` = other active validators retained over.
-    fn chill(c: u32, v: u32) -> Weight;
+    /// Weight of `chill`; `c` = other candidates retained over.
+    /// `ActiveValidators` is not touched (the seat drops at the next
+    /// session boundary), so there is no `v` component.
+    fn chill(c: u32) -> Weight;
 }
 
 /// Test-only `WeightInfo` used by unit-test mocks.
@@ -1029,7 +1029,7 @@ impl WeightInfo for () {
     fn validate(_c: u32) -> Weight {
         Weight::from_parts(10_000, 0)
     }
-    fn chill(_c: u32, _v: u32) -> Weight {
+    fn chill(_c: u32) -> Weight {
         Weight::from_parts(10_000, 0)
     }
 }

@@ -47,6 +47,8 @@ history is `CHANGELOG.md`.
 - The `testnet` chainspec preset + genesis ceremony allocation
   (`docs/genesis-ceremony.md`).
 - Runtime-upgrade drill (Wasm→Wasm `set_code`) and a no-op-migration test.
-- Weight regeneration via `benchmark pallet` after the post-benchmark
-  deltas (PQC attest gate, session changes).
+- ~~Weight regeneration via `benchmark pallet`~~ — done: `weights.rs` for both
+  Ghost pallets is now CLI/Wasm-measured on this tree (chill benchmark
+  corrected to match the session-boundary chill design; `pqc_attest` measured
+  with the bonded-validator gate).
 - See `docs/testnet-readiness.md` for the authoritative open list.
