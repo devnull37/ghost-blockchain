@@ -23,7 +23,7 @@ Release bar: the standard a top-tier organization would apply before shipping a 
 - [x] Property tests (proptest): retarget bounds/monotonicity, seal verify accept/reject vs mining — PR #9/#10 (reward-conservation + selection-distribution properties in pallet tests)
 - [x] Fuzz target for seal decode + digest parsing (bounded input, no panic on arbitrary bytes) — PR #18 (4 cargo-fuzz targets ~17M execs zero crashes + found real retarget-math divergence, fixed via shared `compute_next_difficulty`)
 - [x] e2e on the Ghost path (`scripts/e2e-ghost.sh`): 2 miners + committee peer, author PoW blocks (seal digests via RPC), finalize, rewards land, restart+rejoin — PR #17 (7-check gate, CI e2e job repointed at it)
-- [ ] Soak (`scripts/soak-ghost.sh`): ≥4 nodes, ≥30 min, mixed restarts, finalized-head agreement, no finality stall — harness merged (PR #16); found `MinimumPeriod` ratchet (fixed 41abc2d, validated: rejects 90→0, rate 3.3×); full ≥30min run still pending
+- [x] Soak (`scripts/soak-ghost.sh`): PASSED 2400s on spec-103 release — 797 blocks, fin lag avg 2.3/max 12, both keyless SIGKILL restarts resynced+resumed authoring, 0 TooFarInFuture, 0 violations — docs/soak-report.md
 - [x] Failure-mode tests: `scripts/e2e-faults.sh` PASSED on spec-103 — scenario A miner halt (finality caught the frozen best at the fin=best−2 voting-rule equilibrium, held without overshoot, resumed on return), B committee member offline (best advanced, finality pinned at 0, resumed on rejoin), C equivocation (crafted GRANDPA-signed prevote pair submitted via signed `report_equivocation`; SlashRecords names Alice, bond 1e15→0, liveness kept) — docs/adversarial-report.md
 
 ### Ops baseline
