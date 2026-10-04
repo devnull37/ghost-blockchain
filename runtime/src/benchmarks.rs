@@ -30,4 +30,5 @@ frame_benchmarking::define_benchmarks!(
     [pallet_timestamp, Timestamp]
     [pallet_sudo, Sudo]
     [pallet_ghost_consensus, GhostConsensus]
+    [pallet_ghost_pqc, GhostPqc]
 );
