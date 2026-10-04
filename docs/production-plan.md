@@ -24,7 +24,7 @@ Release bar: the standard a top-tier organization would apply before shipping a 
 - [x] Fuzz target for seal decode + digest parsing (bounded input, no panic on arbitrary bytes) — PR #18 (4 cargo-fuzz targets ~17M execs zero crashes + found real retarget-math divergence, fixed via shared `compute_next_difficulty`)
 - [x] e2e on the Ghost path (`scripts/e2e-ghost.sh`): 2 miners + committee peer, author PoW blocks (seal digests via RPC), finalize, rewards land, restart+rejoin — PR #17 (7-check gate, CI e2e job repointed at it)
 - [ ] Soak (`scripts/soak-ghost.sh`): ≥4 nodes, ≥30 min, mixed restarts, finalized-head agreement, no finality stall — harness merged (PR #16); found `MinimumPeriod` ratchet (fixed 41abc2d, validated: rejects 90→0, rate 3.3×); full ≥30min run still pending
-- [ ] Failure-mode tests: `scripts/e2e-faults.sh` merged — scenario A miner halt (finality catches frozen best, no overshoot, resumes), B committee member offline (best advances, finality pinned, resumes), C equivocation (on-chain slash + offender identity in SlashRecords); full pass pending
+- [x] Failure-mode tests: `scripts/e2e-faults.sh` PASSED on spec-103 — scenario A miner halt (finality caught the frozen best at the fin=best−2 voting-rule equilibrium, held without overshoot, resumed on return), B committee member offline (best advanced, finality pinned at 0, resumed on rejoin), C equivocation (crafted GRANDPA-signed prevote pair submitted via signed `report_equivocation`; SlashRecords names Alice, bond 1e15→0, liveness kept) — docs/adversarial-report.md
 
 ### Ops baseline
 - [x] CI on every PR: fmt, clippy, tests, node build, e2e-smoke — PR #8 (6 jobs green)
@@ -43,7 +43,7 @@ Release bar: the standard a top-tier organization would apply before shipping a 
 - [x] RPC surface audit: docs/rpc-surface.md — full method inventory, DenyUnsafe plumbing verified, `--rpc-methods` guidance
 
 ### Runtime quality
-- [ ] `spec_version`/`impl_version`/`transaction_version` bump policy documented (docs/runtime-upgrade-policy.md); `scripts/e2e-upgrade.sh` drill written (Wasm→Wasm via set_code on a devnet) — first run pending
+- [x] `spec_version`/`impl_version`/`transaction_version` bump policy documented (docs/runtime-upgrade-policy.md); `scripts/e2e-upgrade.sh` PASSED on spec-103 — real `sudo(system.set_code)` applied spec 103→104 on a live chain, finality continued, GhostConsensus storage version intact; drill found+fixed the polkadot-js u8a-Bytes empty-`:code` hazard (documented in the policy)
 - [x] Storage migration framework convention (versioned storage, `OnRuntimeUpgrade` hooks) + a tested no-op migration — MigrateToV2 now wired via `Hooks::on_runtime_upgrade` (was tested-but-unreachable); `migration_is_noop_when_already_v2` green; ghost-pqc stamps storage_version(1)
 - [x] Genesis ceremony doc for public testnet: docs/genesis-ceremony.md + `scripts/genesis-generate.sh` + `chainspecs/ghost-testnet-params.example.json` — spec generation verified end-to-end (plain+raw+SHA256); real allocation table is ceremony-time material by design
 - [x] SS58 prefix decision documented (docs/genesis-ceremony.md — default 42 acceptable for testnet, registration required before mainnet)
