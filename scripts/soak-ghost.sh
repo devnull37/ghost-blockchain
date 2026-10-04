@@ -702,10 +702,14 @@ while (( $(date +%s) < END_TS )); do
 	# Sample every node concurrently. Sequential sampling adds the network's
 	# whole block production between the first and last node's RPC calls —
 	# at ~1 block/s+ that's several blocks of fake head "spread" per tick.
+	# (wait must name the sampler pids: a bare wait would also wait for the
+	# node processes started with & and dead-lock the monitor.)
+	sample_pids=()
 	for name in "${ALL_NODES[@]}"; do
 		collect_row "$name" "$now" "$elapsed" >"$SOAK_DIR/row.$name" &
+		sample_pids+=($!)
 	done
-	wait
+	wait "${sample_pids[@]}"
 	for name in "${ALL_NODES[@]}"; do
 		LAST_ROW[$name]="$(cat "$SOAK_DIR/row.$name")"
 	done
