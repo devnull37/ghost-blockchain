@@ -12,10 +12,23 @@ was *observed* on this box (spec_version 103 binary).
 **Setup:** Alice + Bob validate (committee, no `--mine`); one keyless miner
 authors all blocks. Baseline reached (best ≥ 6, finalized ≥ 3). Miner killed.
 
-**Expected:** best head freezes. GRANDPA finalizes up to the frozen best and
-stops — never past it (nothing to finalize). Miner restart → both resume.
+**Expected:** best head freezes. GRANDPA finalizes as far as its voting
+rules allow and stops — never past the frozen best. Miner restart → both
+resume.
 
-**Observed:** _pending first full run_
+**Observed:** best froze at 6. Finality converged to 4 — not 6 — and held
+there through a 15 s watch window with zero overshoot. On resume the chain
+advanced to best 9 / finalized 7.
+
+The `fin = best − 2` equilibrium is upstream GRANDPA semantics, verified in
+the polkadot-sdk source (`voting_rule.rs`): the node's default
+`VotingRulesBuilder` is `BeforeBestBlockBy(2)` +
+`ThreeQuartersOfTheUnfinalizedChain`, which restricts prevote targets to
+`best − 2`. Live `grandpa=debug` logs confirmed voters signing for two
+blocks behind the frozen head every ~1 s without progressing. Consequence
+for Ghost: **finality always lags best by ≥ 2** — this bounds what the
+docs may claim and is now the asserted invariant in `e2e-faults.sh`
+(converge to best−2, hold, resume lag-2).
 
 ## Scenario B — half the committee offline
 
@@ -46,7 +59,7 @@ seated committee is never mutated mid-session). Liveness continues.
   is a separate exercise (soak covers restart churn, not netsplit).
 - Scenario A's "frozen best" read has a ~3 s settling window; a late-arriving
   in-flight block could in principle trip the overshoot assert — on
-  localhost this has not been observed.
+  localhost this has not been observed in two runs.
 - The equivocation report lands via the honest nodes' offchain workers;
   a network where *every* node is malicious would not be covered by this
   scenario (threat-model: honest-majority assumption).
