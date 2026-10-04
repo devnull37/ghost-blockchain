@@ -53,6 +53,8 @@
 #   SOAK_BUILD=always    rebuild the release binary even if present
 #   SOAK_MINING_THREADS  PoW grind threads per miner (default 1)
 #   SOAK_DIR             output dir (default <repo>/soak-data)
+#   GHOST_NODE_MEM_ARGS  extra node args (default caps db/wasm memory so
+#                        the full 5-node soak fits on a ~8GB box)
 #
 # Requires: curl, jq, python3. Exit 0 only if every invariant held for the
 # whole duration.
@@ -150,6 +152,8 @@ LAST_BEST_REF=0
 LAST_BEST_REF_T=0
 KILLED_MINERS=()
 
+NODE_MEM_ARGS="${GHOST_NODE_MEM_ARGS:---db-cache 32 --max-runtime-instances 1 --runtime-cache-size 1}"
+
 node_args() {
 	local name="$1"
 	local args=(
@@ -158,6 +162,8 @@ node_args() {
 		--no-telemetry
 		-l "warn,pow=info"
 	)
+	# shellcheck disable=SC2206
+	args+=($NODE_MEM_ARGS)
 	case "$name" in
 		alice)
 			args+=(--alice --validator --mine --miner-coinbase "$ALICE_SS58"
