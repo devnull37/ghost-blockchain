@@ -112,6 +112,7 @@ RPC_DEAD_TICKS=3        # consecutive RPC failures before we call the node hung
 RESTART_DOWN_SECS=30    # how long a killed miner stays down
 RESTART_GRACE_SECS=60   # invariant grace after a restart
 WARMUP_MAX=180          # deadline for the first finalized block
+BOOT_GRACE_SECS=30      # head-spread grace while the booted network converges
 
 # Dev-account coinbases (SS58 checked against the genesis pubkeys in
 # runtime/src/genesis_config_presets.rs; distinct per miner so authored
@@ -152,7 +153,9 @@ LAST_BEST_REF=0
 LAST_BEST_REF_T=0
 KILLED_MINERS=()
 
-NODE_MEM_ARGS="${GHOST_NODE_MEM_ARGS:---db-cache 32 --max-runtime-instances 1 --runtime-cache-size 1}"
+# instances=1 starves the executor under a 5-node PoW burst ("Ran out of
+# free WASM instances" -> import lag -> head spread): 2 is the floor here.
+NODE_MEM_ARGS="${GHOST_NODE_MEM_ARGS:---db-cache 32 --max-runtime-instances 2 --runtime-cache-size 2}"
 
 node_args() {
 	local name="$1"
@@ -385,7 +388,7 @@ check_invariants() {
 		fi
 	done
 
-	if (( have_best == 1 && max_best - min_best > HEAD_SPREAD_MAX )); then
+	if (( have_best == 1 && max_best - min_best > HEAD_SPREAD_MAX && now >= BOOT_GRACE_UNTIL )); then
 		fail "best-head spread $((max_best - min_best)) > $HEAD_SPREAD_MAX across live nodes"
 	fi
 
@@ -683,6 +686,7 @@ done
 LAST_FIN="$fin_now"
 LAST_FIN_CHANGE="$(date +%s)"
 GRACE_UNTIL_GLOBAL=$START_TS
+BOOT_GRACE_UNTIL=$((START_TS + BOOT_GRACE_SECS))
 echo "==> Finality live at #$LAST_FIN"
 
 KILL1_AT=$(( DURATION / 4 ))
@@ -695,9 +699,15 @@ while (( $(date +%s) < END_TS )); do
 	now="$(date +%s)"
 	elapsed=$((now - START_TS))
 
+	# Sample every node concurrently. Sequential sampling adds the network's
+	# whole block production between the first and last node's RPC calls —
+	# at ~1 block/s+ that's several blocks of fake head "spread" per tick.
 	for name in "${ALL_NODES[@]}"; do
-		row="$(collect_row "$name" "$now" "$elapsed")"
-		LAST_ROW[$name]="$row"
+		collect_row "$name" "$now" "$elapsed" >"$SOAK_DIR/row.$name" &
+	done
+	wait
+	for name in "${ALL_NODES[@]}"; do
+		LAST_ROW[$name]="$(cat "$SOAK_DIR/row.$name")"
 	done
 	ALICE_BEST="$(echo "${LAST_ROW[alice]}" | awk '{print $1}')"
 	ALICE_FIN="$(echo "${LAST_ROW[alice]}" | awk '{print $2}')"
