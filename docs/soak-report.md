@@ -145,3 +145,34 @@ false positives across the runs while still catching real stalls.
 - A PASS requires every invariant to hold for the whole duration; any
   violation aborts with a diagnostic dump into
   `soak-data/diagnostic-dump.txt` and exit 1.
+
+## Full-run result (2400s, 5 nodes, release binary, spec-103)
+
+PASSED — verified on `devin/integration`.
+
+| metric | value |
+| --- | --- |
+| blocks produced (max best) | 797 |
+| max finalized height | 795 |
+| finality lag (best − finalized) | avg 2.3 / p95 3 / max 12 |
+| max observed finalized-head stall | 43s (inside the adaptive limit) |
+| invariant violations | 0 |
+| crashes / RPC hangs / finalized-hash disagreements | 0 |
+| keyless-miner restarts | miner1 + miner2 (SIGKILL, 30s down each) — both resynced AND resumed authoring (81 and 60 new canonical blocks post-restart) |
+
+Canonical authoring spread (heights 1..795, `pow_` digest attribution):
+alice 193, bob 216, miner1 197, miner2 193, rpcnode 0 (observer).
+`TooFarInFuture` rejects: **0 across all miners** — the `MinimumPeriod=1ms`
+fix holds at soak scale (~0.75s effective block rate sustained for 40 min).
+The 43 `Unable to import` lines are lost fork-choice races (self-authored
+on a parent that lost), not timestamp or seal failures; that is the
+expected orphan rate at this production speed on localhost.
+
+Harness fixes proven by this run (all landed in this run's script):
+per-tick node sampling is now concurrent (sequential sampling baked
+2–4s of production into the spread measurement), the sampler `wait` is
+scoped to sampler pids (a bare `wait` dead-locked on the node processes),
+a 30s boot head-spread grace covers post-warmup convergence, and node
+memory is capped via `GHOST_NODE_MEM_ARGS` defaults
+(`--db-cache 32 --max-runtime-instances 2 --runtime-cache-size 2` —
+the 5-node soak peaks at ~1.4GB on an 8GB box).

@@ -78,6 +78,10 @@ Do not schedule a public testnet until all of the following are true:
 9. `scripts/soak-ghost.sh` completes a ≥30-min multi-node soak with no
    invariant violations (finality advance, bounded head spread, ≥1 peer,
    no finalized forks) — see `docs/soak-report.md`.
+   *(Passed on spec-103, release binary — 2400s, 5 nodes, 797 blocks,
+   fin lag avg 2.3/max 12, max fin stall 43s inside the adaptive limit,
+   both SIGKILL'd keyless miners resynced and resumed authoring, zero
+   TooFarInFuture rejects, zero panics — `docs/soak-report.md`.)*
 10. Genesis machinery exists for a real allocation:
     `scripts/genesis-generate.sh` + ceremony checklist
     (`docs/genesis-ceremony.md`).
