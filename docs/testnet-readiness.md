@@ -52,6 +52,11 @@ Do not schedule a public testnet until all of the following are true:
 5. `rtk scripts/e2e-ghost.sh` (the two-node Ghost-consensus gate) passes from a clean checkout.
 6. `scripts/e2e-faults.sh` (adversarial gate) passes: miner halt/resume,
    validator offline/rejoin, and GRANDPA equivocation → slash + removal.
+   *(Passed on spec-103 — A: frozen-best equilibrium held at fin=best−2
+   under the default voting rules; B: finality pinned at 0 with 1/2
+   committee, resumed on rejoin; C: equivocation report included,
+   SlashRecords names Alice, bond 1e15→0 — see
+   `docs/adversarial-report.md`.)*
 7. `scripts/e2e-forged-seal.sh` passes: honest nodes deterministically
    reject blocks sealed with a corrupted `pre_hash` from a patched node.
    *(Passed on spec-103 — evil node self-authored 10 blocks, 16 honest
