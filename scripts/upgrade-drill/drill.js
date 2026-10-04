@@ -36,12 +36,17 @@ async function main() {
 
   await new Promise((resolve, reject) => {
     const timeout = setTimeout(() => reject(new Error("set_code inclusion timeout")), 180_000);
+    let done = false;
     call.signAndSend(alice, ({ status, dispatchError }) => {
+      if (done) return;
       if (dispatchError) {
+        done = true;
         clearTimeout(timeout);
         reject(new Error(`dispatch: ${dispatchError.toString()}`));
+        return;
       }
-      if (status.isInBlock || status.isFinalized) {
+      if (status.isInBlock) {
+        done = true;
         clearTimeout(timeout);
         log(`set_code included in ${status.asInBlock.toHex()}`);
         resolve();
@@ -49,12 +54,14 @@ async function main() {
     }).catch(reject);
   });
 
-  // New wasm executes on the NEXT block's runtime update. Poll spec.
+  // New wasm executes on the NEXT block's runtime update. Poll the LIVE
+  // version via RPC — api.runtimeVersion is captured once at init and
+  // never refreshes.
   const deadline = Date.now() + 120_000;
   let after = before;
   while (Date.now() < deadline) {
-    await api.query.system.number(); // force a state refresh
-    after = api.runtimeVersion.specVersion.toNumber();
+    const rv = await api.rpc.state.getRuntimeVersion();
+    after = rv.specVersion.toNumber();
     if (after === EXPECTED) break;
     await new Promise((r) => setTimeout(r, 3000));
   }
