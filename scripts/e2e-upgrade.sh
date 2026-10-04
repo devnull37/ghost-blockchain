@@ -60,7 +60,7 @@ trap cleanup EXIT
 
 echo "== booting dev node (port $PORT) =="
 "$BIN" --dev -d "$BASE" \
-    --mine --miner-coinbase d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d \
+    --mine --miner-coinbase 5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY \
     --rpc-port "$RPCPORT" --port "$PORT" --prometheus-port "$PROMPORT" \
     --rpc-methods Unsafe \
     > "$BASE/node.log" 2>&1 &
