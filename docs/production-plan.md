@@ -59,11 +59,12 @@ Release bar: the standard a top-tier organization would apply before shipping a 
 
 ## P2 — Post-testnet / pre-mainnet backlog (tracked, not necessarily built)
 - [ ] Public testnet metrics: finalized-head SLO, peer diversity, upgrade drill
-- [ ] External audit engagement plan
+- [x] External audit engagement plan — `docs/external-audit.md` (scoped by risk, candidate vendors, engagement timing tied to the SDK bump)
 - [x] Governance path (referenda or council) before sudo removal on mainnet — spec-104 lands `pallet_democracy` + `pallet_collective`(Council) + `pallet_membership` + `pallet_scheduler` + `pallet_preimage` + `pallet_utility` (indices 15–20). Council is seeded at genesis from the validator committee; democracy is the sovereign path (public proposals/referenda, enactment via Scheduler as root). Council powers: table external proposals (1/2), default-pass (3/5), fast-track (2/3), cancel (2/3), veto (single member); unanimous-only instant path for emergencies. `scripts/e2e-governance.sh` PASSED live: preimage note → council external proposal → fast-tracked referendum → Alice+Bob AYE → `balances.force_set_balance` enacted as root — while finality kept advancing
-- [ ] Light-client story (warp sync proof provider already wired; document)
-- [ ] Explorer/indexer integration notes
-- [ ] Deterministic builds (reproducible) and release signing
+- [x] Light-client story — `docs/light-client.md` (warp-sync provider wired; trust model: light clients verify pow_ seals but follow GRANDPA finality, not aux fork choice)
+- [x] Explorer/indexer integration notes — `docs/explorer-indexer.md` (digest-decoded miner attribution, no reward events, deposit-diff rewards, governance surface)
+- [x] Release signing — `release.yml` signs every artifact with cosign keyless (sigstore bundle attached per file; verify recipe in `docs/release-verification.md`)
+- [ ] Deterministic builds: IN-PATH determinism proven (`check-wasm-reproducible.sh`: two same-path clean builds → identical sha256). Cross-machine bit-reproducibility needs srtool — the remaining open item
 
 ## Execution model
-All work now lands directly on `devin/integration` in small verified commits (single-operator flow — no more child sessions). Integration merges into `main` via PR #7 once the merge policy is decided. Nothing lands without: (a) tests green, (b) a review pass over the delta, (c) docs updated in the same commit. Checkboxes get ticked only with a link to the commit/run that proves it.
+All work now lands directly on `devin/integration` in small verified commits (single-operator flow — no more child sessions). Integration merges into `main` via PR #19 once the user merges it. Nothing lands without: (a) tests green, (b) a review pass over the delta, (c) docs updated in the same commit. Checkboxes get ticked only with a link to the commit/run that proves it.
