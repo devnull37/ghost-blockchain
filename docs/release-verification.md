@@ -39,9 +39,11 @@ sha256sum target/release/wbuild/solochain-template-runtime/solochain_template_ru
 ```
 
 The toolchain is pinned (`rust-toolchain.toml`: rustc 1.88.0 +
-wasm32-unknown-unknown), so a clean-tree build should produce the same hash
-as `ghost-runtime.wasm`. `scripts/check-wasm-reproducible.sh` automates the
-two-clean-dir comparison if you want byte-exact evidence on your own
-hardware — path-dependent metadata can still differ on some toolchains, so a
-mismatch should be investigated rather than assumed malicious (see
-`docs/production-plan.md` — full srtool determinism is tracked as a P2 item).
+wasm32-unknown-unknown). Note the honest limit: rustc embeds the build
+directory path in wasm inputs, so the hash only reproduces when you build
+at the *same absolute path* the release CI used — treat this as a
+tamper-evident integrity check on a known environment, not portable
+reproducible-build proof. `scripts/check-wasm-reproducible.sh` automates an
+in-path double build for byte-exact evidence; full cross-machine
+determinism requires srtool (tracked as a P2 item in
+`docs/production-plan.md`).
