@@ -216,6 +216,14 @@ jobs:
         run: |
           chmod +x /tmp/ghost-target/debug/ghost-node
           /tmp/ghost-target/debug/ghost-node --version
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # The equivocation crafter is a polkadot-js driver — its deps are
+      # gitignored and must be installed (no lockfile committed).
+      - name: Install upgrade-drill deps
+        working-directory: scripts/upgrade-drill
+        run: npm install --no-audit --no-fund
       # Adversarial gate: miner halt/resume, committee member offline,
       # GRANDPA equivocation -> on-chain slash. Same artifact reuse
       # pattern as the e2e job.
@@ -234,10 +242,11 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@v4
+      # Prebuilt binary — `cargo install cargo-audit` no longer compiles
+      # on the pinned toolchain (its deps require rustc >= 1.89).
+      - uses: taiki-e/install-action@cargo-audit
       # cargo audit against the committed lockfile (RustSec advisory DB).
-      - uses: rustsec/audit-check@v2
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - run: cargo audit
 
   deny:
     name: deny
