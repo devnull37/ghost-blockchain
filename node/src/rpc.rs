@@ -14,7 +14,6 @@ use jsonrpsee::{
     proc_macros::rpc,
     RpcModule,
 };
-pub use sc_rpc_api::DenyUnsafe;
 use sc_transaction_pool_api::TransactionPool;
 use solochain_template_runtime::{opaque::Block, AccountId, Balance, Nonce};
 use sp_api::ProvideRuntimeApi;
@@ -27,12 +26,12 @@ pub struct FullDeps<C, P> {
     pub client: Arc<C>,
     /// Transaction pool instance.
     pub pool: Arc<P>,
-    /// Whether unsafe RPC calls should be denied.
-    pub deny_unsafe: DenyUnsafe,
+    // stable2412 enforces DenyUnsafe at the RPC server layer (Extensions),
+    // not per-module — the field is gone from System::new.
 }
 
 /// Ghost node RPC surface for honest status reporting.
-#[rpc(client, server)]
+#[rpc(server)]
 pub trait GhostNodeApi {
     /// Report the actual block authoring and finality engines in this build.
     #[method(name = "ghost_getNodeStatus")]
@@ -114,13 +113,9 @@ where
     use substrate_frame_rpc_system::{System, SystemApiServer};
 
     let mut module = RpcModule::new(());
-    let FullDeps {
-        client,
-        pool,
-        deny_unsafe,
-    } = deps;
+    let FullDeps { client, pool } = deps;
 
-    module.merge(System::new(client.clone(), pool, deny_unsafe).into_rpc())?;
+    module.merge(System::new(client.clone(), pool).into_rpc())?;
     module.merge(TransactionPayment::new(client.clone()).into_rpc())?;
     module.merge(GhostNodeRpc::new(client).into_rpc())?;
 

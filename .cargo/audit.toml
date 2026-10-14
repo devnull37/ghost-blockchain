@@ -1,81 +1,99 @@
-# cargo-audit configuration.
-#
-# `ignore` entries are advisories we CANNOT fix by `cargo update`: the
-# vulnerable version is pinned by the polkadot-sdk `stable2407` dependency
-# tree (see docs/security-advisories.md for the per-crate pinning path and
-# exposure assessment). Every entry is re-evaluated on each SDK bump —
-# the doc lists the upstream constraint that forces the pin.
-
+# cargo-audit configuration — see docs/security-advisories.md for the full
+# accepted-risk register (pinning path, exposure assessment, revisit policy)
+# behind every entry here. Remove an entry only when the SDK pin moves.
 [advisories]
-# --- h2 0.3.27 (hyper 0.14 → sc-offchain HTTP client) ------------------
-# RUSTSEC-2026-0258 requires h2 >=0.4.16; hyper 0.14 pins h2 ^0.3. The only
-# exposure is offchain-worker HTTP — reachable only if a runtime OCW makes
-# requests; our runtime has none. Upgrade path: SDK bump.
 ignore = [
+
     "RUSTSEC-2026-0258", # h2 0.3.27 via hyper 0.14 (sc-offchain)
 
-    # --- idna 0.2.3 / 0.4.0 (url chains in libp2p/sc-* metadata) --------
-    # RUSTSEC-2024-0421 requires idna >=1.0; url 1.x/2.x chains in the SDK
-    # pin 0.2.3/0.4.0. Punycode-label acceptance is a spoofing-class issue,
-    # not memory safety; no URL parsing on the consensus path.
     "RUSTSEC-2024-0421", # idna 0.2.3/0.4.0 via url (sc-*/libp2p)
 
-    # --- quinn-proto 0.9.6 / 0.10.6 (libp2p-quic / litep2p) -------------
-    # DoS-class advisories on the QUIC listener; fixes land in quinn-proto
-    # >=0.11.x but libp2p-quic 0.9/litep2p pin 0.9/0.10. REAL exposure for
-    # public nodes (P2P port) — mitigations are rate-limiting + the planned
-    # SDK bump; tracked in docs/security-advisories.md.
     "RUSTSEC-2026-0037",
+
     "RUSTSEC-2026-0185",
+
     "RUSTSEC-2026-0338",
+
     "RUSTSEC-2026-0339",
+
     "RUSTSEC-2026-0342",
 
-    # --- ring 0.16.20 (rustls webpki + libp2p noise) --------------------
-    # RUSTSEC-2025-0009/0010 fix lines are 0.17.x; dependents pin 0.16.
     "RUSTSEC-2025-0009",
+
     "RUSTSEC-2025-0010",
 
-    # --- rustls 0.20.9 (libp2p-websocket / hyper-rustls via sc-offchain) -
-    # RUSTSEC-2024-0336 fixed >=0.21.11; websocket-rustls pins 0.20. Same
-    # offchain-worker-only exposure as h2.
-    "RUSTSEC-2024-0336",
-
-    # --- rustls-webpki 0.101.7 (rustls 0.21 via libp2p/quinn) ------------
-    # Fixed >=0.103.12; rustls 0.21 pins webpki 0.101.x. Cert-chain checks —
-    # P2P TLS uses noise keys, not X.509; exposure limited to OCW TLS.
     "RUSTSEC-2026-0098",
+
     "RUSTSEC-2026-0099",
+
     "RUSTSEC-2026-0104",
 
-    # --- wasmtime 8.0.1 (sc-executor-wasmtime) ---------------------------
-    # 20 advisories against the EOL 8.x line; fixes land on >=24.x. The SDK
-    # pins wasmtime 8 for the deterministic executor. Triage per advisory:
-    # most are component-model/Winch/WASI paths the Substrate executor never
-    # reaches (core-wasm MVP guest, no WASI, no component model, Cranelift
-    # only). Executor-relevant ones (Cranelift miscompilation / sandbox
-    # escape classes) are called out in docs/security-advisories.md and are
-    # the concrete driver for the SDK-upgrade roadmap item.
     "RUSTSEC-2023-0091",  # i64x2.shr_s miscompile (Cranelift, x86_64)
+
     "RUSTSEC-2024-0438",  # Windows device filenames — n/a on Linux nodes
+
     "RUSTSEC-2024-0442",  # jit-debug dump — dev feature, off in release
+
     "RUSTSEC-2025-0118",  # shared linear memory — not used by executor
+
     "RUSTSEC-2026-0020",  # WASI resource exhaustion — no WASI in executor
+
     "RUSTSEC-2026-0021",  # wasi:http fields panic — no WASI-http
+
     "RUSTSEC-2026-0085",  # flags component lifting — component model
+
     "RUSTSEC-2026-0086",  # 64-bit tables + Winch — Winch not used
+
     "RUSTSEC-2026-0087",  # f64x2.splat Cranelift — executor-relevant, see doc
+
     "RUSTSEC-2026-0088",  # pooling allocator — not enabled
+
     "RUSTSEC-2026-0089",  # Winch table.fill — Winch not used
+
     "RUSTSEC-2026-0091",  # component string transcoding — component model
+
     "RUSTSEC-2026-0092",  # component UTF-16 transcode — component model
+
     "RUSTSEC-2026-0093",  # component UTF-16 transcode — component model
+
     "RUSTSEC-2026-0094",  # Winch table.grow — Winch not used
+
     "RUSTSEC-2026-0095",  # Winch sandbox escape — Winch not used
+
     "RUSTSEC-2026-0096",  # aarch64 Cranelift miscompile — x86_64 nodes only
+
     "RUSTSEC-2026-0222",  # type-index mixup — requires multi-engine setup
+
     "RUSTSEC-2026-0269",  # filesystem sandbox — no WASI fs in executor
+
     "RUSTSEC-2026-0316",  # component lifting fuel — component model
+    # ---- added for the stable2412 tree ----
+    # network/TLS production paths (SDK-pinned)
+    "RUSTSEC-2026-0118",  # hickory-proto 0.25 (litep2p): NSEC3 loop, no fix released
+    "RUSTSEC-2026-0119",  # hickory-proto 0.25 (litep2p): O(n^2) name compression, fix needs 0.26
+    "RUSTSEC-2026-0049",  # rustls-webpki 0.102 (rustls 0.22 -> subxt dev path): CRL matching
+    # dev/build-only paths (never reach the running node)
+    "RUSTSEC-2026-0344",  # ruzstd 0.5 (smoldot -> subxt codegen)
+    # unmaintained / informational
+    "RUSTSEC-2020-0168",  # nsn
+    "RUSTSEC-2022-0061",  # parity-wasm
+    "RUSTSEC-2024-0370",  # proc-macro-error
+    "RUSTSEC-2024-0384",  # instant
+    "RUSTSEC-2024-0388",  # derivative
+    "RUSTSEC-2024-0436",  # paste
+    "RUSTSEC-2025-0017",  # rustls-pemfile
+    "RUSTSEC-2025-0057",  # fxhash
+    "RUSTSEC-2025-0134",  # rustls-pemfile
+    "RUSTSEC-2025-0141",  # bincode
+    "RUSTSEC-2025-0161",  # libsecp256k1
+    "RUSTSEC-2026-0002",  # lru
+    "RUSTSEC-2026-0012",  # anyhow
+    "RUSTSEC-2026-0097",  # memmap2
+    "RUSTSEC-2026-0105",  # core2
+    "RUSTSEC-2026-0186",  # trust-dns-proto
+    "RUSTSEC-2026-0190",  # mach
+    "RUSTSEC-2026-0202",  # rand 0.7
+    "RUSTSEC-2026-0253",  # lru
 ]
 
 [output]

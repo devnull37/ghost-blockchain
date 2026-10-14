@@ -238,12 +238,24 @@ impl frame_system::offchain::SigningTypes for Runtime {
     type Signature = Signature;
 }
 
-impl<C> frame_system::offchain::SendTransactionTypes<C> for Runtime
+impl<C> frame_system::offchain::CreateTransactionBase<C> for Runtime
 where
     RuntimeCall: From<C>,
 {
     type Extrinsic = super::UncheckedExtrinsic;
-    type OverarchingCall = RuntimeCall;
+    type RuntimeCall = RuntimeCall;
+}
+
+// 2412 splits the old SendTransactionTypes into CreateTransactionBase +
+// CreateInherent (bare extrinsics for pallet inherents — im-online
+// heartbeats and GRANDPA equivocation reports are submitted unsigned).
+impl<C> frame_system::offchain::CreateInherent<C> for Runtime
+where
+    RuntimeCall: From<C>,
+{
+    fn create_inherent(call: Self::RuntimeCall) -> Self::Extrinsic {
+        super::UncheckedExtrinsic::new_bare(call)
+    }
 }
 
 impl pallet_grandpa::Config for Runtime {
@@ -290,6 +302,8 @@ impl pallet_balances::Config for Runtime {
     type MaxFreezes = VariantCountOf<RuntimeFreezeReason>;
     type RuntimeHoldReason = RuntimeHoldReason;
     type RuntimeFreezeReason = RuntimeFreezeReason;
+    /// No post-slash callback — Ghost slashing goes through OnOffenceHandler.
+    type DoneSlashHandler = ();
 }
 
 parameter_types! {
@@ -304,6 +318,7 @@ impl pallet_transaction_payment::Config for Runtime {
     type WeightToFee = IdentityFee<Balance>;
     type LengthToFee = IdentityFee<Balance>;
     type FeeMultiplierUpdate = ConstFeeMultiplier<FeeMultiplier>;
+    type WeightInfo = pallet_transaction_payment::weights::SubstrateWeight<Runtime>;
 }
 
 impl pallet_sudo::Config for Runtime {
@@ -419,6 +434,11 @@ impl pallet_collective::Config<CouncilCollective> for Runtime {
     type WeightInfo = pallet_collective::weights::SubstrateWeight<Runtime>;
     type SetMembersOrigin = EnsureRoot<AccountId>;
     type MaxProposalWeight = MaxProposalWeight;
+    /// Root can disapprove/kill motions — emergency brake only; council
+    /// motions otherwise live and die by votes. No proposal deposit.
+    type DisapproveOrigin = EnsureRoot<AccountId>;
+    type KillOrigin = EnsureRoot<AccountId>;
+    type Consideration = ();
 }
 
 pub type CouncilMembershipInstance = pallet_membership::Instance1;

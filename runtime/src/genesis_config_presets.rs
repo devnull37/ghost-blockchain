@@ -87,6 +87,7 @@ fn testnet_genesis(
         // given. Session keys are the single source of truth for the
         // genesis committee.
         "session": SessionConfig {
+            non_authority_keys: Vec::new(),
             keys: initial_authorities
                 .iter()
                 .map(|x| {
@@ -179,9 +180,9 @@ pub fn local_config_genesis() -> Value {
 
 /// Provides the JSON representation of predefined genesis config for given `id`.
 pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
-    let patch = match id.as_ref() {
-        b"dev" => development_config_genesis(),
-        b"local_testnet" => local_config_genesis(),
+    let patch = match id.as_str() {
+        "dev" => development_config_genesis(),
+        "local_testnet" => local_config_genesis(),
         _ => return None,
     };
     Some(
