@@ -21,7 +21,7 @@ workspace = true
 clap = { workspace = true, features = ["derive"] }
 codec = { workspace = true }
 futures = { workspace = true, features = ["thread-pool"] }
-jsonrpsee = { workspace = true, features = ["server"] }
+jsonrpsee = { workspace = true, features = ["server", "macros"] }
 log = "0.4.21"
 
 # substrate client

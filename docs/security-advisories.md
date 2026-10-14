@@ -2,7 +2,7 @@
 
 `cargo audit` runs in CI (`.github/workflows/ci.yml`, `audit` job) and must
 stay green. Advisories we cannot fix with `cargo update` — because the
-vulnerable version is pinned by the `polkadot-sdk` `stable2407` dependency
+vulnerable version is pinned by the `polkadot-sdk` `stable2412` dependency
 tree — are documented here and ignored with justification in
 `.cargo/audit.toml`. This register is re-evaluated on every SDK bump.
 
@@ -12,9 +12,8 @@ tree — are documented here and ignored with justification in
 |---|---|---|
 | `h2 0.3.27` | `hyper 0.14` → `sc-offchain` | RUSTSEC-2026-0258 |
 | `idna 0.2.3` / `0.4.0` | `url` chains in `sc-*`/`libp2p` | RUSTSEC-2024-0421 |
-| `quinn-proto 0.9.6` / `0.10.6` | `libp2p-quic` / `litep2p` → `sc-network` | RUSTSEC-2026-0037, -0185, -0338, -0339, -0342 |
+| `quinn-proto 0.10.6` | `libp2p-quic` / `litep2p` → `sc-network` | RUSTSEC-2026-0037, -0185, -0338, -0339, -0342 |
 | `ring 0.16.20` | `rustls`/`webpki`/`libp2p-noise` | RUSTSEC-2025-0009, -0010 |
-| `rustls 0.20.9` | `libp2p-websocket`/`hyper-rustls` | RUSTSEC-2024-0336 |
 | `rustls-webpki 0.101.7` | `rustls 0.21` → `libp2p`/`quinn` | RUSTSEC-2026-0098, -0099, -0104 |
 | `wasmtime 8.0.1` | `sc-executor-wasmtime` | 20 advisories, see below |
 
@@ -24,7 +23,7 @@ tree — are documented here and ignored with justification in
   packets against a public P2P listener can panic/exhaust a node. These are
   DoS (availability), not remote code execution. Mitigations available now:
   keep the QUIC port behind rate-limiting (the operator guide documents
-  `--listen-addr` and firewall posture); the fix is the SDK bump below.
+  `--listen-addr` and firewall posture); partially cleared by the stable2412 bump; full fix needs a later SDK line.
 - **wasmtime 8.0.1** — the Substrate executor runs core-wasm MVP guests with
   Cranelift only: no component model, no WASI, no Winch, no shared memory,
   single engine. Most advisories (component transcoding, WASI, Winch,
@@ -50,3 +49,13 @@ tree — are documented here and ignored with justification in
    ignore and `cargo update` immediately — CI will catch a stale ignore.
 3. New ignores require: the pinning path identified, an exposure note here,
    and a reviewer ack on the PR (don't blanket-ignore).
+
+## stable2412 bump (2026-10)
+
+Moving `stable2407` → `stable2412` dropped ~35 flagged IDs — the whole
+rustls-0.20/webpki-0.22/quinn-0.9 families plus old `idna`/`h2` duplicates.
+New accepted entries added for the 2412 tree: hickory-proto 0.25 DNS
+(litep2p → sc-network; production listener), rustls-webpki 0.102
+(subxt/jsonrpsee — dev/codegen path only), ruzstd 0.5 (smoldot codegen,
+build-time only), plus ~15 unmaintained-crate warnings (bincode, derivative,
+fxhash, instant, libsecp256k1, ...).

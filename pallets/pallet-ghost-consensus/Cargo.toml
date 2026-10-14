@@ -30,7 +30,7 @@ pallet-session = { workspace = true, default-features = false, features = ["hist
 # Substrate primitives
 sp-core = { workspace = true, default-features = false }
 sp-runtime = { workspace = true, default-features = false }
-sp-staking = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407", default-features = false }
+sp-staking = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2412", default-features = false }
 sp-std = { workspace = true, default-features = false }
 
 # Local primitives (POW_ENGINE_ID used to decode the author digest)
@@ -42,9 +42,9 @@ sp-runtime = { workspace = true, default-features = true }
 # Native benchmark-measurement harness (`mod measure` in `benchmarking.rs`):
 # TrackingBackend runs the real generated `run_benchmark` with DB-access and
 # PoV tracking that `InMemoryBackend` leaves unimplemented.
-sp-state-machine = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407" }
-sp-externalities = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407" }
-sp-trie = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407" }
+sp-state-machine = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2412" }
+sp-externalities = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2412" }
+sp-trie = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2412" }
 proptest.workspace = true
 
 [features]

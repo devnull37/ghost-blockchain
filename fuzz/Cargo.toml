@@ -12,8 +12,8 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 arbitrary = { version = "1", features = ["derive"] }
 parity-scale-codec = "3.7.5"
-sp-core = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407" }
-sp-runtime = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2407" }
+sp-core = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2412" }
+sp-runtime = { git = "https://github.com/paritytech/polkadot-sdk.git", branch = "stable2412" }
 # `cargo fuzz` compiles every crate in the graph with `--cfg fuzzing`; deps
 # that gate fuzz-only code on that cfg then need their optional fuzz
 # dependencies enabled or they fail to build.
