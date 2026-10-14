@@ -29,14 +29,18 @@ use frame_support::{
     pallet_prelude::BoundedVec,
     parameter_types,
     traits::{
-        ConstBool, ConstU128, ConstU32, ConstU64, ConstU8, Get, KeyOwnerProofSystem, VariantCountOf,
+        ConstBool, ConstU128, ConstU32, ConstU64, ConstU8, EitherOfDiverse, Get,
+        KeyOwnerProofSystem, VariantCountOf,
     },
     weights::{
         constants::{RocksDbWeight, WEIGHT_REF_TIME_PER_SECOND},
         IdentityFee, Weight,
     },
 };
-use frame_system::limits::{BlockLength, BlockWeights};
+use frame_system::{
+    limits::{BlockLength, BlockWeights},
+    EnsureRoot, EnsureSigned,
+};
 use pallet_grandpa::AuthorityId as GrandpaId;
 use pallet_im_online::sr25519::AuthorityId as ImOnlineId;
 use pallet_transaction_payment::{ConstFeeMultiplier, FungibleAdapter, Multiplier};
@@ -50,10 +54,11 @@ use sp_version::RuntimeVersion;
 
 // Local module imports
 use super::{
-    AccountId, Balance, Balances, Block, BlockNumber, GhostConsensus, GhostPqc, Hash, Historical,
-    ImOnline, Nonce, Offences, PalletInfo, Runtime, RuntimeCall, RuntimeEvent, RuntimeFreezeReason,
-    RuntimeHoldReason, RuntimeOrigin, RuntimeTask, SessionKeys, Signature, System, DAYS,
-    EXISTENTIAL_DEPOSIT, SLOT_DURATION, UNIT, VERSION,
+    AccountId, Balance, Balances, Block, BlockNumber, Council, GhostConsensus, GhostPqc, Hash,
+    Historical, ImOnline, Nonce, Offences, OriginCaller, PalletInfo, Preimage, Runtime,
+    RuntimeCall, RuntimeEvent, RuntimeFreezeReason, RuntimeHoldReason, RuntimeOrigin, RuntimeTask,
+    Scheduler, SessionKeys, Signature, System, DAYS, EXISTENTIAL_DEPOSIT, HOURS, MILLI_UNIT,
+    SLOT_DURATION, UNIT, VERSION,
 };
 
 const NORMAL_DISPATCH_RATIO: Perbill = Perbill::from_percent(75);
@@ -380,4 +385,180 @@ impl pallet_ghost_pqc::Config for Runtime {
     type BondedValidators = BondedValidatorAdapter;
     #[cfg(feature = "runtime-benchmarks")]
     type BenchmarkHelper = GhostPqcBenchmarkHelper;
+}
+
+// ---------------------------------------------------------------------------
+// Governance: council (collective + membership) + democracy + scheduler +
+// preimage + utility.
+//
+// Shape: public proposals/referenda are the sovereign path (token holders
+// decide, enactment via Scheduler). The Council is a small technocratic body
+// seeded at genesis from the validator committee; it can table external
+// proposals (majority), fast-track (2/3), cancel (2/3), and veto
+// (single member). Instant origin is disabled — nothing executes without a
+// vote or root.
+// ---------------------------------------------------------------------------
+
+parameter_types! {
+    pub const CouncilMotionDuration: BlockNumber = 3 * DAYS;
+    pub const CouncilMaxProposals: u32 = 100;
+    pub const CouncilMaxMembers: u32 = 100;
+    /// A council motion may not consume more than half a block on dispatch.
+    pub MaxProposalWeight: Weight = Perbill::from_percent(50) * RuntimeBlockWeights::get().max_block;
+}
+
+pub type CouncilCollective = pallet_collective::Instance1;
+impl pallet_collective::Config<CouncilCollective> for Runtime {
+    type RuntimeOrigin = RuntimeOrigin;
+    type Proposal = RuntimeCall;
+    type RuntimeEvent = RuntimeEvent;
+    type MotionDuration = CouncilMotionDuration;
+    type MaxProposals = CouncilMaxProposals;
+    type MaxMembers = CouncilMaxMembers;
+    type DefaultVote = pallet_collective::PrimeDefaultVote;
+    type WeightInfo = pallet_collective::weights::SubstrateWeight<Runtime>;
+    type SetMembersOrigin = EnsureRoot<AccountId>;
+    type MaxProposalWeight = MaxProposalWeight;
+}
+
+pub type CouncilMembershipInstance = pallet_membership::Instance1;
+impl pallet_membership::Config<CouncilMembershipInstance> for Runtime {
+    type RuntimeEvent = RuntimeEvent;
+    // Membership changes are governance-level decisions: root (democracy
+    // root, once sudo is removed) or root during the sudo era.
+    type AddOrigin = EnsureRoot<AccountId>;
+    type RemoveOrigin = EnsureRoot<AccountId>;
+    type SwapOrigin = EnsureRoot<AccountId>;
+    type ResetOrigin = EnsureRoot<AccountId>;
+    type PrimeOrigin = EnsureRoot<AccountId>;
+    type MembershipInitialized = Council;
+    type MembershipChanged = Council;
+    type MaxMembers = CouncilMaxMembers;
+    type WeightInfo = pallet_membership::weights::SubstrateWeight<Runtime>;
+}
+
+impl pallet_utility::Config for Runtime {
+    type RuntimeEvent = RuntimeEvent;
+    type RuntimeCall = RuntimeCall;
+    type PalletsOrigin = OriginCaller;
+    type WeightInfo = pallet_utility::weights::SubstrateWeight<Runtime>;
+}
+
+parameter_types! {
+    /// A scheduled (incl. referendum-enacted) call may use up to 80% of a block.
+    pub MaximumSchedulerWeight: Weight = Perbill::from_percent(80) * RuntimeBlockWeights::get().max_block;
+    pub const MaxScheduledPerBlock: u32 = 50;
+}
+
+impl pallet_scheduler::Config for Runtime {
+    type RuntimeEvent = RuntimeEvent;
+    type RuntimeOrigin = RuntimeOrigin;
+    type PalletsOrigin = OriginCaller;
+    type RuntimeCall = RuntimeCall;
+    type MaximumWeight = MaximumSchedulerWeight;
+    type ScheduleOrigin = EnsureRoot<AccountId>;
+    type OriginPrivilegeCmp = frame_support::traits::EqualPrivilegeOnly;
+    type MaxScheduledPerBlock = MaxScheduledPerBlock;
+    type WeightInfo = pallet_scheduler::weights::SubstrateWeight<Runtime>;
+    type Preimages = Preimage;
+}
+
+parameter_types! {
+    /// Hold reason token used by `HoldConsideration` for preimage deposits.
+    pub const PreimageHoldReason: RuntimeHoldReason =
+        RuntimeHoldReason::Preimage(pallet_preimage::HoldReason::Preimage);
+    pub const PreimageBaseDeposit: Balance = 10 * UNIT;
+    pub const PreimageByteDeposit: Balance = MILLI_UNIT;
+}
+
+impl pallet_preimage::Config for Runtime {
+    type WeightInfo = pallet_preimage::weights::SubstrateWeight<Runtime>;
+    type RuntimeEvent = RuntimeEvent;
+    type Currency = Balances;
+    type ManagerOrigin = EnsureRoot<AccountId>;
+    type Consideration = frame_support::traits::fungible::HoldConsideration<
+        AccountId,
+        Balances,
+        PreimageHoldReason,
+        frame_support::traits::LinearStoragePrice<
+            PreimageBaseDeposit,
+            PreimageByteDeposit,
+            Balance,
+        >,
+    >;
+}
+
+parameter_types! {
+    // Periods sized for a 5s-block testnet but sane for mainnet governance:
+    // ~1 day proposal table, ~5 day vote, ~1 day enactment.
+    pub const LaunchPeriod: BlockNumber = DAYS;
+    pub const VotingPeriod: BlockNumber = 5 * DAYS;
+    pub const FastTrackVotingPeriod: BlockNumber = 3 * HOURS;
+    pub const MinimumDeposit: Balance = 10 * UNIT;
+    pub const EnactmentPeriod: BlockNumber = DAYS;
+    pub const VoteLockingPeriod: BlockNumber = DAYS;
+    pub const CooloffPeriod: BlockNumber = 7 * DAYS;
+    pub const MaxVotesPerAccount: u32 = 100;
+    pub const MaxProposalsPerPublic: u32 = 100;
+    pub const MaxDepositsPerAccount: u32 = 100;
+    pub const MaxBlacklistedProposals: u32 = 100;
+}
+
+impl pallet_democracy::Config for Runtime {
+    type WeightInfo = pallet_democracy::weights::SubstrateWeight<Runtime>;
+    type RuntimeEvent = RuntimeEvent;
+    type Scheduler = Scheduler;
+    type Preimages = Preimage;
+    type Currency = Balances;
+    type EnactmentPeriod = EnactmentPeriod;
+    type LaunchPeriod = LaunchPeriod;
+    type VotingPeriod = VotingPeriod;
+    type VoteLockingPeriod = VoteLockingPeriod;
+    type MinimumDeposit = MinimumDeposit;
+    // Instant enactment is allowed ONLY through `InstantOrigin` — a unanimous
+    // council (EnsureProportionAtLeast 1/1). It's the emergency fast path:
+    // on a real committee unanimity is a high bar, and it also lets the
+    // governance e2e drill run a full referendum in gate time.
+    type InstantAllowed = ConstBool<true>;
+    type FastTrackVotingPeriod = FastTrackVotingPeriod;
+    type CooloffPeriod = CooloffPeriod;
+    type MaxVotes = MaxVotesPerAccount;
+    type MaxProposals = MaxProposalsPerPublic;
+    type MaxDeposits = MaxDepositsPerAccount;
+    type MaxBlacklisted = MaxBlacklistedProposals;
+    type SubmitOrigin = EnsureSigned<AccountId>;
+    // External proposals come from the Council: a plain majority tables one,
+    // a 3/5 majority passes by default-majority, and it fast-tracks at 2/3.
+    // (`externalPropose` tables SuperMajorityApprove, which fast_track
+    // refuses by design — drills should use externalProposeMajority.)
+    type ExternalOrigin =
+        pallet_collective::EnsureProportionAtLeast<AccountId, CouncilCollective, 1, 2>;
+    type ExternalMajorityOrigin =
+        pallet_collective::EnsureProportionAtLeast<AccountId, CouncilCollective, 1, 2>;
+    type ExternalDefaultOrigin =
+        pallet_collective::EnsureProportionAtLeast<AccountId, CouncilCollective, 3, 5>;
+    type FastTrackOrigin =
+        pallet_collective::EnsureProportionAtLeast<AccountId, CouncilCollective, 2, 3>;
+    type InstantOrigin =
+        pallet_collective::EnsureProportionAtLeast<AccountId, CouncilCollective, 1, 1>;
+    // Referendum cancellation: root, or a 2/3 council vote.
+    type CancellationOrigin = EitherOfDiverse<
+        EnsureRoot<AccountId>,
+        pallet_collective::EnsureProportionAtLeast<AccountId, CouncilCollective, 2, 3>,
+    >;
+    // Blacklisting a (hash, index) pair is a root-level emergency control.
+    type BlacklistOrigin = EnsureRoot<AccountId>;
+    // Proposal (not referendum) cancellation: root or council majority.
+    type CancelProposalOrigin = EitherOfDiverse<
+        EnsureRoot<AccountId>,
+        pallet_collective::EnsureProportionAtLeast<AccountId, CouncilCollective, 1, 2>,
+    >;
+    // Any single council member may veto an external proposal once per
+    // cooloff — a circuit breaker against council capture.
+    type VetoOrigin = pallet_collective::EnsureMember<AccountId, CouncilCollective>;
+    type PalletsOrigin = OriginCaller;
+    // Slashed referendum deposits are burned: Ghost routes block rewards
+    // through the consensus pallet, and there is no treasury yet. Burning is
+    // the conservative default (deflationary, no discretionary pot).
+    type Slash = ();
 }

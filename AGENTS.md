@@ -33,11 +33,19 @@ Consensus reality:
   digest — never from extrinsics.
 - `scripts/e2e-local.sh` is retired; the local gates are `e2e-ghost.sh`
   (two-miner smoke), `e2e-faults.sh` (adversarial), `e2e-forged-seal.sh`
-  (invalid-PoW rejection), and `soak-ghost.sh` (multi-node soak).
+  (invalid-PoW rejection), `e2e-upgrade.sh` (live set_code drill),
+  `e2e-governance.sh` (council+democracy lifecycle), and `soak-ghost.sh`
+  (multi-node soak).
+- Governance (spec-104): `pallet_democracy` is the sovereign path;
+  Council (collective+membership, indices 18-19) is genesis-seeded from
+  the validator committee and can table/fast-track/cancel/veto.
+  `InstantAllowed` is on but restricted to a UNANIMOUS council — keep it
+  that way unless deliberately redesigning. Sudo remains only for the
+  testnet era; removal is a pre-mainnet chainspec decision.
 
 Next todos (see `docs/production-plan.md` + `docs/testnet-readiness.md`):
-- Full ≥30-min soak and first `e2e-faults.sh`/`e2e-forged-seal.sh` passes
-  on the final tree.
+- Governance landed in spec-104 — keep council/democracy configs honest:
+  any change to origins/periods reopens the security design.
 - `testnet` chainspec preset with a real genesis allocation
   (`docs/genesis-ceremony.md`).
 - Runtime-upgrade drill (Wasm→Wasm `set_code`) and a tested no-op

@@ -31,4 +31,10 @@ frame_benchmarking::define_benchmarks!(
     [pallet_sudo, Sudo]
     [pallet_ghost_consensus, GhostConsensus]
     [pallet_ghost_pqc, GhostPqc]
+    [pallet_utility, Utility]
+    [pallet_scheduler, Scheduler]
+    [pallet_preimage, Preimage]
+    [pallet_collective, Council]
+    [pallet_membership, CouncilMembership]
+    [pallet_democracy, Democracy]
 );

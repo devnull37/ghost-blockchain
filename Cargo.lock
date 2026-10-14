@@ -1563,7 +1563,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8d162beedaa69905488a8da94f5ac3edb4dd4788b732fadb7bd120b2625c1976"
 dependencies = [
  "data-encoding",
- "syn 1.0.109",
+ "syn 2.0.107",
 ]
 
 [[package]]
@@ -1977,7 +1977,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5076,7 +5076,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5315,6 +5315,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "pallet-collective"
+version = "37.0.0"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=stable2407#92be93c7cb34d6a2c30639cd17994f589c3cdc60"
+dependencies = [
+ "frame-benchmarking",
+ "frame-support",
+ "frame-system",
+ "log",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core",
+ "sp-io",
+ "sp-runtime",
+]
+
+[[package]]
+name = "pallet-democracy"
+version = "37.0.0"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=stable2407#92be93c7cb34d6a2c30639cd17994f589c3cdc60"
+dependencies = [
+ "frame-benchmarking",
+ "frame-support",
+ "frame-system",
+ "log",
+ "parity-scale-codec",
+ "scale-info",
+ "serde",
+ "sp-core",
+ "sp-io",
+ "sp-runtime",
+]
+
+[[package]]
 name = "pallet-ghost-consensus"
 version = "0.0.0"
 dependencies = [
@@ -5399,6 +5432,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "pallet-membership"
+version = "37.0.0"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=stable2407#92be93c7cb34d6a2c30639cd17994f589c3cdc60"
+dependencies = [
+ "frame-benchmarking",
+ "frame-support",
+ "frame-system",
+ "log",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core",
+ "sp-io",
+ "sp-runtime",
+]
+
+[[package]]
 name = "pallet-offences"
 version = "36.0.0"
 source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=stable2407#92be93c7cb34d6a2c30639cd17994f589c3cdc60"
@@ -5412,6 +5461,39 @@ dependencies = [
  "serde",
  "sp-runtime",
  "sp-staking",
+]
+
+[[package]]
+name = "pallet-preimage"
+version = "37.0.0"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=stable2407#92be93c7cb34d6a2c30639cd17994f589c3cdc60"
+dependencies = [
+ "frame-benchmarking",
+ "frame-support",
+ "frame-system",
+ "log",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core",
+ "sp-io",
+ "sp-runtime",
+]
+
+[[package]]
+name = "pallet-scheduler"
+version = "38.0.0"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=stable2407#92be93c7cb34d6a2c30639cd17994f589c3cdc60"
+dependencies = [
+ "docify",
+ "frame-benchmarking",
+ "frame-support",
+ "frame-system",
+ "log",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-io",
+ "sp-runtime",
+ "sp-weights",
 ]
 
 [[package]]
@@ -5510,6 +5592,21 @@ dependencies = [
  "sp-api",
  "sp-runtime",
  "sp-weights",
+]
+
+[[package]]
+name = "pallet-utility"
+version = "37.0.1"
+source = "git+https://github.com/paritytech/polkadot-sdk.git?branch=stable2407#92be93c7cb34d6a2c30639cd17994f589c3cdc60"
+dependencies = [
+ "frame-benchmarking",
+ "frame-support",
+ "frame-system",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core",
+ "sp-io",
+ "sp-runtime",
 ]
 
 [[package]]
@@ -6829,7 +6926,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8398,16 +8495,22 @@ dependencies = [
  "hex-literal",
  "pallet-authorship",
  "pallet-balances",
+ "pallet-collective",
+ "pallet-democracy",
  "pallet-ghost-consensus",
  "pallet-ghost-pqc",
  "pallet-grandpa",
  "pallet-im-online",
+ "pallet-membership",
  "pallet-offences",
+ "pallet-preimage",
+ "pallet-scheduler",
  "pallet-session",
  "pallet-sudo",
  "pallet-timestamp",
  "pallet-transaction-payment",
  "pallet-transaction-payment-rpc-runtime-api",
+ "pallet-utility",
  "parity-scale-codec",
  "scale-info",
  "serde_json",
@@ -9382,7 +9485,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix 1.1.2",
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -10601,7 +10704,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.48.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

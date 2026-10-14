@@ -26,6 +26,13 @@ history is `CHANGELOG.md`.
   `OnOffenceHandler` slashing incl. unbonding chunks, bounded storage.
 - `pallet-ghost-pqc` (index 14): ML-DSA-87 registry in the Wasm build;
   `validate()` requires a key; `pqc_attest` requires bonded stake.
+- Governance stack (spec-104, indices 15–20): `pallet_utility`,
+  `pallet_scheduler`, `pallet_preimage`, Council = `pallet_collective` I1
+  + `pallet_membership` I1, `pallet_democracy`. Council is seeded at
+  genesis from the validator committee; democracy is the sovereign path
+  (public proposals → referenda → root enactment via Scheduler). Council:
+  external proposals 1/2, default-pass 3/5, fast-track 2/3, cancel 2/3,
+  single-member veto; instant path is unanimity-only.
 - Session/offences/im-online wired; `PowFindAuthor` attributes real
   authors; equivocation reports auto-submit via offchain tx pool.
 
@@ -33,10 +40,12 @@ history is `CHANGELOG.md`.
 
 - Unit/property: 72 workspace tests + 4 fuzz targets (~17M execs).
 - Live e2e: `e2e-ghost.sh` (7 checks), `e2e-faults.sh` (3 adversarial
-  scenarios), `e2e-forged-seal.sh` (invalid-PoW rejection), `soak-ghost.sh`
+  scenarios), `e2e-forged-seal.sh` (invalid-PoW rejection),
+  `e2e-upgrade.sh` (spec 103→104 live set_code), `e2e-governance.sh`
+  (full council+democracy+scheduler lifecycle), `soak-ghost.sh`
   (40-min profile; QUICK passed twice, full run pending).
-- CI: fmt/clippy/test/wasm-build/build/e2e/e2e-faults/audit/deny + weekly
-  soak; release pipeline on `v*` tags.
+- CI: fmt/clippy/test/wasm-build/build/e2e/e2e-faults/e2e-governance/
+  audit/deny + weekly soak; release pipeline on `v*` tags.
 - Security: round-1 (19 findings, criticals fixed) + round-2 reviews in
   `docs/security-review/`.
 

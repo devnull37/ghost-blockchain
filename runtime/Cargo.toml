@@ -31,6 +31,12 @@ frame-try-runtime = { optional = true, workspace = true, default-features = fals
 # frame pallets
 pallet-authorship = { workspace = true, default-features = false }
 pallet-balances = { workspace = true, default-features = false }
+pallet-collective = { workspace = true, default-features = false }
+pallet-democracy = { workspace = true, default-features = false }
+pallet-membership = { workspace = true, default-features = false }
+pallet-preimage = { workspace = true, default-features = false }
+pallet-scheduler = { workspace = true, default-features = false }
+pallet-utility = { workspace = true, default-features = false }
 pallet-grandpa = { workspace = true, default-features = false }
 pallet-im-online = { workspace = true, default-features = false }
 pallet-offences = { workspace = true, default-features = false }
@@ -81,6 +87,12 @@ runtime-benchmarks = [
     "frame-system-benchmarking/runtime-benchmarks",
     "frame-system/runtime-benchmarks",
     "pallet-balances/runtime-benchmarks",
+    "pallet-collective/runtime-benchmarks",
+    "pallet-democracy/runtime-benchmarks",
+    "pallet-membership/runtime-benchmarks",
+    "pallet-preimage/runtime-benchmarks",
+    "pallet-scheduler/runtime-benchmarks",
+    "pallet-utility/runtime-benchmarks",
     "pallet-ghost-consensus/runtime-benchmarks",
     "pallet-ghost-pqc/runtime-benchmarks",
     "pallet-grandpa/runtime-benchmarks",
@@ -98,6 +110,12 @@ std = [
     "frame-system-rpc-runtime-api/std",
     "pallet-authorship/std",
     "pallet-balances/std",
+    "pallet-collective/std",
+    "pallet-democracy/std",
+    "pallet-membership/std",
+    "pallet-preimage/std",
+    "pallet-scheduler/std",
+    "pallet-utility/std",
     "pallet-grandpa/std",
     "pallet-im-online/std",
     "pallet-offences/std",
