@@ -84,6 +84,10 @@ Do not schedule a public testnet until all of the following are true:
    fin lag avg 2.3/max 12, max fin stall 43s inside the adaptive limit,
    both SIGKILL'd keyless miners resynced and resumed authoring, zero
    TooFarInFuture rejects, zero panics — `docs/soak-report.md`.)*
+   Re-verified on stable2412 at spec-104: a 300s/4-node QUICK soak
+   passed — 366 canonical authored blocks, both SIGKILL'd keyless-miner
+   restarts resumed authoring (11 blocks post-restart), zero
+   TooFarInFuture rejects and zero panics.
 10. Genesis machinery exists for a real allocation:
     `scripts/genesis-generate.sh` + ceremony checklist
     (`docs/genesis-ceremony.md`).
