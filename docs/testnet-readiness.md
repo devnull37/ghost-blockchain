@@ -67,7 +67,9 @@ Do not schedule a public testnet until all of the following are true:
    *(Passed on spec-103 — full 1.73 MB runtime submitted as
    `sudo(system.set_code)` applied spec 103→104 in-block, best and
    finalized heads advanced on the new runtime, `GhostConsensus` storage
-   version still 2. Operational hazard found and fixed in the drill: the
+   version still 2. Re-verified on stable2412 at spec-104: the drill
+   applied spec 104→105 live, best 3→110 and finalized 0→103 on the new
+   runtime. Operational hazard found and fixed in the drill: the
    installed @polkadot/types decodes a `Uint8Array`/`Buffer` `Bytes` arg
    as already-SCALE-encoded, so a wasm blob starting with `0x00` encodes
    as an EMPTY vec — `:code` stored zero-length wedges the chain
