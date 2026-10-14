@@ -128,6 +128,10 @@ genesis = {
         "stakers": stakers,
         "initialValidators": initial_validators,
     },
+    # Seed the Council from the same stake-backed identities that finalize
+    # the chain (mirrors the dev/local presets). `councilMembership`
+    # initializes the collective — no separate `council` section.
+    "councilMembership": {"members": initial_validators},
 }
 root = params.get("root")
 if root is not None:
