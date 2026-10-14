@@ -33,6 +33,80 @@ allow = [
     "GPL-3.0-or-later WITH Classpath-exception-2.0",
 ]
 
+# Parity's polkadot-node-side crates are licensed plain `GPL-3.0-only`
+# (no Classpath exception). They enter our tree only through
+# `frame-benchmarking-cli` -> `cumulus-client-parachain-inherent`, i.e.
+# they are compiled into the ghost-node *binary* — `cargo tree -p
+# solochain-template-runtime` confirms none reach the Wasm runtime. Since
+# the node binary already links GPL client crates (the sc-* stack above),
+# shipping these under GPL-3.0-only is the same posture every Substrate
+# node has (polkadot's own binary is GPL-3.0). Exception, not a global
+# allow, so no *new* crate can pull GPL-3.0-only unnoticed.
+[[licenses.exceptions]]
+name = "polkadot-core-primitives"
+version = "16"
+allow = ["GPL-3.0-only"]
+
+[[licenses.exceptions]]
+name = "polkadot-node-metrics"
+version = "21"
+allow = ["GPL-3.0-only"]
+
+[[licenses.exceptions]]
+name = "polkadot-node-network-protocol"
+version = "21"
+allow = ["GPL-3.0-only"]
+
+[[licenses.exceptions]]
+name = "polkadot-node-primitives"
+version = "17"
+allow = ["GPL-3.0-only"]
+
+[[licenses.exceptions]]
+name = "polkadot-node-subsystem-types"
+version = "21"
+allow = ["GPL-3.0-only"]
+
+[[licenses.exceptions]]
+name = "polkadot-overseer"
+version = "21"
+allow = ["GPL-3.0-only"]
+
+[[licenses.exceptions]]
+name = "polkadot-parachain-primitives"
+version = "15"
+allow = ["GPL-3.0-only"]
+
+[[licenses.exceptions]]
+name = "polkadot-primitives"
+version = "17"
+allow = ["GPL-3.0-only"]
+
+[[licenses.exceptions]]
+name = "polkadot-statement-table"
+version = "17"
+allow = ["GPL-3.0-only"]
+
+[[licenses.exceptions]]
+name = "staging-xcm"
+version = "15"
+allow = ["GPL-3.0-only"]
+
+[[licenses.exceptions]]
+name = "tracing-gum"
+version = "17"
+allow = ["GPL-3.0-only"]
+
+[[licenses.exceptions]]
+name = "tracing-gum-proc-macro"
+version = "5"
+allow = ["GPL-3.0-only"]
+
+[[licenses.exceptions]]
+name = "xcm-procedural"
+version = "11"
+allow = ["GPL-3.0-only"]
+
 # ring 0.16.20's manifest license field ("Apache-2.0/GPL-3.0") is not a
 # valid SPDX expression, so cargo-deny treats the crate as unlicensed.
 # ring's LICENSE file is the well-known ISC-style ring license; clarify it
