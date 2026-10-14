@@ -4,7 +4,7 @@ Status: ratified target architecture. All consensus work must implement this doc
 
 ## 1. Architecture
 
-Ghost is a hybrid PoW/PoS chain on Substrate (polkadot-sdk `stable2407`):
+Ghost is a hybrid PoW/PoS chain on Substrate (polkadot-sdk `stable2412`):
 
 - **Block production: real Proof-of-Work** via `sc-consensus-pow`. Miners grind a nonce against the block pre-hash; the import queue of every node verifies the seal before import. Fork choice is heaviest-chain by cumulative difficulty (`PowAux` aux data, `total_difficulty` comparison inside `PowBlockImport`), not longest-chain.
 - **Finality: GRANDPA.** A PoS committee (the top stakers, selected by `pallet_session`) votes to finalize blocks. PoW produces candidates; stakers provide deterministic finality. This is the honest meaning of "PoS validation" on Ghost: finality votes, not per-block extrinsics.

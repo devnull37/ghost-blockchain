@@ -42,7 +42,7 @@ tree — are documented here and ignored with justification in
 
 ## Revisit policy
 
-1. SDK branch bump (stable2407 → current) is the single fix for this whole
+1. SDK branch bumps are the single fix for this whole
    register — tracked as a P1 roadmap item in `docs/production-plan.md`.
    Re-run `cargo update` + clear entries that no longer apply at each bump.
 2. If an entry's pinning crate releases a semver-compatible fix, remove the
@@ -52,7 +52,7 @@ tree — are documented here and ignored with justification in
 
 ## stable2412 bump (2026-10)
 
-Moving `stable2407` → `stable2412` dropped ~35 flagged IDs — the whole
+Moving `stable2412` → `stable2412` dropped ~35 flagged IDs — the whole
 rustls-0.20/webpki-0.22/quinn-0.9 families plus old `idna`/`h2` duplicates.
 New accepted entries added for the 2412 tree: hickory-proto 0.25 DNS
 (litep2p → sc-network; production listener), rustls-webpki 0.102
