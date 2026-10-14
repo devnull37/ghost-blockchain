@@ -29,9 +29,18 @@ frame-system = { workspace = true, default-features = false }
 frame-try-runtime = { optional = true, workspace = true, default-features = false }
 
 # frame pallets
-pallet-aura = { workspace = true, default-features = false }
+pallet-authorship = { workspace = true, default-features = false }
 pallet-balances = { workspace = true, default-features = false }
+pallet-collective = { workspace = true, default-features = false }
+pallet-democracy = { workspace = true, default-features = false }
+pallet-membership = { workspace = true, default-features = false }
+pallet-preimage = { workspace = true, default-features = false }
+pallet-scheduler = { workspace = true, default-features = false }
+pallet-utility = { workspace = true, default-features = false }
 pallet-grandpa = { workspace = true, default-features = false }
+pallet-im-online = { workspace = true, default-features = false }
+pallet-offences = { workspace = true, default-features = false }
+pallet-session = { workspace = true, default-features = false, features = ["historical"] }
 pallet-sudo = { workspace = true, default-features = false }
 pallet-timestamp = { workspace = true, default-features = false }
 pallet-transaction-payment = { workspace = true, default-features = false }
@@ -39,7 +48,6 @@ pallet-transaction-payment = { workspace = true, default-features = false }
 # primitives
 sp-api = { workspace = true, default-features = false }
 sp-block-builder = { workspace = true, default-features = false }
-sp-consensus-aura = { features = ["serde"], workspace = true, default-features = false }
 sp-consensus-grandpa = { features = ["serde"], workspace = true, default-features = false }
 sp-core = { features = ["serde"], workspace = true, default-features = false }
 sp-genesis-builder = { workspace = true, default-features = false }
@@ -59,11 +67,16 @@ pallet-transaction-payment-rpc-runtime-api = { workspace = true, default-feature
 frame-benchmarking = { optional = true, workspace = true, default-features = false }
 frame-system-benchmarking = { optional = true, workspace = true, default-features = false }
 
-# The pallet in this template.
-pallet-template = { workspace = true, default-features = false }
 
 # Ghost Consensus pallet
 pallet-ghost-consensus = { path = "../pallets/pallet-ghost-consensus", default-features = false }
+pallet-ghost-pqc = { path = "../pallets/pallet-ghost-pqc", default-features = false }
+
+# Ghost PoW primitives (GhostPowApi runtime api + POW_ENGINE_ID)
+ghost-pow-primitives = { workspace = true, default-features = false }
+
+[dev-dependencies]
+sp-io = { workspace = true }
 
 [build-dependencies]
 substrate-wasm-builder = { optional = true, workspace = true, default-features = true }
@@ -71,7 +84,25 @@ substrate-wasm-builder = { optional = true, workspace = true, default-features =
 [features]
 default = ["std"]
 metadata-hash = ["std"]
-runtime-benchmarks = ["frame-benchmarking", "frame-system-benchmarking"]
+runtime-benchmarks = [
+    "frame-benchmarking/runtime-benchmarks",
+    "frame-support/runtime-benchmarks",
+    "frame-system-benchmarking/runtime-benchmarks",
+    "frame-system/runtime-benchmarks",
+    "pallet-balances/runtime-benchmarks",
+    "pallet-collective/runtime-benchmarks",
+    "pallet-democracy/runtime-benchmarks",
+    "pallet-membership/runtime-benchmarks",
+    "pallet-preimage/runtime-benchmarks",
+    "pallet-scheduler/runtime-benchmarks",
+    "pallet-utility/runtime-benchmarks",
+    "pallet-ghost-consensus/runtime-benchmarks",
+    "pallet-ghost-pqc/runtime-benchmarks",
+    "pallet-grandpa/runtime-benchmarks",
+    "pallet-sudo/runtime-benchmarks",
+    "pallet-timestamp/runtime-benchmarks",
+    "sp-runtime/runtime-benchmarks",
+]
 try-runtime = ["frame-try-runtime"]
 std = [
     "codec/std",
@@ -79,19 +110,30 @@ std = [
     "frame-system/std",
     "frame-support/std",
     "frame-metadata-hash-extension/std",
-    "pallet-aura/std",
+    "frame-system-rpc-runtime-api/std",
+    "pallet-authorship/std",
     "pallet-balances/std",
+    "pallet-collective/std",
+    "pallet-democracy/std",
+    "pallet-membership/std",
+    "pallet-preimage/std",
+    "pallet-scheduler/std",
+    "pallet-utility/std",
     "pallet-grandpa/std",
+    "pallet-im-online/std",
+    "pallet-offences/std",
+    "pallet-session/std",
     "pallet-sudo/std",
     "pallet-timestamp/std",
     "pallet-transaction-payment/std",
     "pallet-transaction-payment-rpc-runtime-api/std",
     "pallet-ghost-consensus/std",
+    "pallet-ghost-pqc/std",
+    "ghost-pow-primitives/std",
     "sp-core/std",
     "sp-runtime/std",
     "sp-api/std",
     "sp-block-builder/std",
-    "sp-consensus-aura/std",
     "sp-consensus-grandpa/std",
     "sp-genesis-builder/std",
     "sp-inherents/std",
@@ -102,5 +144,7 @@ std = [
     "sp-version/std",
     "scale-info/std",
     "serde_json/std",
-    "substrate-wasm-builder"
+    "substrate-wasm-builder",
+    "frame-benchmarking?/std",
+    "frame-system-benchmarking?/std",
 ]

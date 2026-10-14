@@ -1,0 +1,8 @@
+{
+  "name": "ghost-upgrade-drill",
+  "private": true,
+  "description": "Polkadot-JS driver for scripts/e2e-upgrade.sh — sudo set_code drill",
+  "dependencies": {
+    "@polkadot/api": "^16"
+  }
+}

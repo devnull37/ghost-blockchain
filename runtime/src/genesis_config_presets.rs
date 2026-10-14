@@ -15,13 +15,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::{AccountId, BalancesConfig, Runtime, SudoConfig};
+use crate::{
+    AccountId, Balance, BalancesConfig, GhostConsensusConfig, SessionConfig, SessionKeys,
+    SudoConfig, UNIT,
+};
 use alloc::{vec, vec::Vec};
+use pallet_grandpa::AuthorityId as GrandpaId;
+use pallet_im_online::sr25519::AuthorityId as ImOnlineId;
 use serde_json::Value;
-use sp_consensus_aura::sr25519::AuthorityId as AuraId;
-use sp_consensus_grandpa::AuthorityId as GrandpaId;
-use sp_core::{crypto::AccountId32, ed25519, sr25519};
+use sp_core::{crypto::AccountId32, ed25519, sr25519, U256};
 use sp_genesis_builder::{self, PresetId};
+
+/// Genesis PoW difficulty work factor (also the retarget floor; matches
+/// `configs::MinDifficulty`).
+const INITIAL_DIFFICULTY: u64 = 1_000_000;
+
+/// Genesis bond for initial validators (dev/local presets).
+const GENESIS_VALIDATOR_STAKE: Balance = 1_000 * UNIT;
 
 const ALICE_SR25519: [u8; 32] =
     hex_literal::hex!("d43593c715fdd31c61141abd04a99fd6822c8558854ccde39a5684e7a56da27d");
@@ -45,20 +55,20 @@ const BOB_ED25519: [u8; 32] =
     hex_literal::hex!("d17c2d7823ebf260fd138f2d7e27d114c0145d968b5ff5006125f2414fadae69");
 
 fn account(public: [u8; 32]) -> AccountId {
-    AccountId32::from(public).into()
-}
-
-fn aura(public: [u8; 32]) -> AuraId {
-    sr25519::Public::from_raw(public).into()
+    AccountId32::from(public)
 }
 
 fn grandpa(public: [u8; 32]) -> GrandpaId {
     ed25519::Public::from_raw(public).into()
 }
 
+fn im_online(public: [u8; 32]) -> ImOnlineId {
+    sr25519::Public::from_raw(public).into()
+}
+
 // Returns the genesis config presets populated with given parameters.
 fn testnet_genesis(
-    initial_authorities: Vec<(AuraId, GrandpaId)>,
+    initial_authorities: Vec<(AccountId, GrandpaId, ImOnlineId)>,
     endowed_accounts: Vec<AccountId>,
     root: AccountId,
 ) -> Value {
@@ -70,21 +80,65 @@ fn testnet_genesis(
                 .map(|k| (k, 1u128 << 60))
                 .collect::<Vec<_>>(),
         },
-        "aura": pallet_aura::GenesisConfig::<Runtime> {
-            authorities: initial_authorities.iter().map(|x| x.0.clone()).collect::<Vec<_>>(),
+        // No `grandpa`/`imOnline` genesis sections: `pallet_session`'s
+        // `on_genesis_session` seeds `pallet_grandpa::Authorities` and
+        // `pallet_im_online::Keys` from these session keys, and both pallets'
+        // own genesis configs panic with "already initialized!" when also
+        // given. Session keys are the single source of truth for the
+        // genesis committee.
+        "session": SessionConfig {
+            non_authority_keys: Vec::new(),
+            keys: initial_authorities
+                .iter()
+                .map(|x| {
+                    (
+                        x.0.clone(),
+                        x.0.clone(),
+                        SessionKeys {
+                            grandpa: x.1.clone(),
+                            im_online: x.2.clone(),
+                        },
+                    )
+                })
+                .collect::<Vec<_>>(),
         },
-        "grandpa": pallet_grandpa::GenesisConfig::<Runtime> {
-            authorities: initial_authorities.iter().map(|x| (x.1.clone(), 1)).collect::<Vec<_>>(),
-            _config: Default::default(),
+        // Genesis stakes make the authorities candidate validators before the
+        // first session rotation.
+        "ghostConsensus": GhostConsensusConfig {
+            difficulty: U256::from(INITIAL_DIFFICULTY),
+            stakers: initial_authorities
+                .iter()
+                .map(|x| (x.0.clone(), GENESIS_VALIDATOR_STAKE))
+                .collect::<Vec<_>>(),
+            initial_validators: initial_authorities
+                .iter()
+                .map(|x| x.0.clone())
+                .collect::<Vec<_>>(),
         },
         "sudo": SudoConfig { key: Some(root) },
+        // The Council is seeded from the genesis validator committee — the
+        // same stake-backed identities that finalize the chain also govern it
+        // until democracy moves membership changes through referenda. Only
+        // `councilMembership` carries the list: it calls
+        // `MembershipInitialized::initialize_members` on the collective, and
+        // passing `council.members` too panics with "already initialized!".
+        "councilMembership": {
+            "members": initial_authorities
+                .iter()
+                .map(|x| x.0.clone())
+                .collect::<Vec<_>>(),
+        },
     })
 }
 
 /// Return the development genesis config.
 pub fn development_config_genesis() -> Value {
     testnet_genesis(
-        vec![(aura(ALICE_SR25519), grandpa(ALICE_ED25519))],
+        vec![(
+            account(ALICE_SR25519),
+            grandpa(ALICE_ED25519),
+            im_online(ALICE_SR25519),
+        )],
         vec![
             account(ALICE_SR25519),
             account(BOB_SR25519),
@@ -99,8 +153,16 @@ pub fn development_config_genesis() -> Value {
 pub fn local_config_genesis() -> Value {
     testnet_genesis(
         vec![
-            (aura(ALICE_SR25519), grandpa(ALICE_ED25519)),
-            (aura(BOB_SR25519), grandpa(BOB_ED25519)),
+            (
+                account(ALICE_SR25519),
+                grandpa(ALICE_ED25519),
+                im_online(ALICE_SR25519),
+            ),
+            (
+                account(BOB_SR25519),
+                grandpa(BOB_ED25519),
+                im_online(BOB_SR25519),
+            ),
         ],
         vec![
             account(ALICE_SR25519),
@@ -118,9 +180,9 @@ pub fn local_config_genesis() -> Value {
 
 /// Provides the JSON representation of predefined genesis config for given `id`.
 pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
-    let patch = match id.as_ref() {
-        b"dev" => development_config_genesis(),
-        b"local_testnet" => local_config_genesis(),
+    let patch = match id.as_str() {
+        "dev" => development_config_genesis(),
+        "local_testnet" => local_config_genesis(),
         _ => return None,
     };
     Some(
@@ -133,4 +195,84 @@ pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 /// List of supported presets.
 pub fn preset_names() -> Vec<PresetId> {
     vec![PresetId::from("dev"), PresetId::from("local_testnet")]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every shipped preset must parse, pass `build_state`, and seed the
+    /// governance council — this is what catches a double-init panic (like
+    /// council+councilMembership both listing members) or a silently empty
+    /// Council before an operator ever boots a node.
+    fn preset_json(name: &'static str) -> Value {
+        let bytes = get_preset(&PresetId::from(name)).expect("preset exists");
+        serde_json::from_slice(&bytes).expect("preset is valid json")
+    }
+
+    /// Recursive object merge — the same patch-over-defaults semantics
+    /// `sc-chain-spec` applies when loading a `genesis.runtimeGenesis.patch`.
+    fn json_merge(base: &mut Value, patch: &Value) {
+        match (base, patch) {
+            (Value::Object(b), Value::Object(p)) => {
+                for (k, v) in p {
+                    json_merge(b.entry(k.clone()).or_insert(Value::Null), v);
+                }
+            }
+            (b, p) => *b = p.clone(),
+        }
+    }
+
+    #[test]
+    fn presets_build_state_cleanly() {
+        for name in ["dev", "local_testnet"] {
+            let patch = preset_json(name);
+            // The real path: patch merged over the default genesis config,
+            // then every pallet's genesis build runs — panics (e.g. "Members
+            // are already initialized!") fail here.
+            let mut merged = serde_json::to_value(crate::RuntimeGenesisConfig::default()).unwrap();
+            json_merge(&mut merged, &patch);
+            sp_io::TestExternalities::default().execute_with(|| {
+                frame_support::genesis_builder_helper::build_state::<crate::RuntimeGenesisConfig>(
+                    serde_json::to_vec(&merged).unwrap(),
+                )
+                .unwrap_or_else(|e| panic!("preset {name} failed build_state: {e:?}"));
+            });
+        }
+    }
+
+    #[test]
+    fn presets_seed_council_from_authorities() {
+        for name in ["dev", "local_testnet"] {
+            let patch = preset_json(name);
+            let members = patch["councilMembership"]["members"]
+                .as_array()
+                .unwrap_or_else(|| panic!("{name} missing councilMembership.members"));
+            assert!(!members.is_empty(), "{name}: council must not be empty");
+            // Council == genesis validators (the stake-backed identities).
+            let validators = patch["ghostConsensus"]["initialValidators"]
+                .as_array()
+                .unwrap();
+            assert_eq!(
+                members.len(),
+                validators.len(),
+                "{name}: council != validator set"
+            );
+            for m in members {
+                assert!(
+                    validators.contains(m),
+                    "{name}: council member {m} not a validator"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn presets_have_sudo_and_session_keys() {
+        for name in ["dev", "local_testnet"] {
+            let patch = preset_json(name);
+            assert!(patch["sudo"]["key"].is_string(), "{name}: missing sudo key");
+            assert!(!patch["session"]["keys"].as_array().unwrap().is_empty());
+        }
+    }
 }

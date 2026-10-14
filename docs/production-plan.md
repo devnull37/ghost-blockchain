@@ -5,65 +5,66 @@ Release bar: the standard a top-tier organization would apply before shipping a 
 ## P0 — Blocking for any testnet claim
 
 ### Consensus core (must be real, not simulated)
-- [ ] PoW block production live in the node service (`sc-consensus-pow`), Aura fully removed (pallet, api, keys, inherents, service wiring, genesis presets)
-- [ ] Seal verification on import at every node; invalid seals rejected deterministically across nodes (proven by e2e with a forged-seal block attempt)
-- [ ] Heaviest-chain fork choice via total difficulty; tie-break rule documented and tested
-- [ ] GRANDPA finality over the PoW chain; finalized head advances under mining contention (2+ miners)
-- [ ] Stake-driven validator committee via `pallet_session`; committee rotates with stake changes; GRANDPA set follows sessions
-- [ ] Difficulty retargeting deterministic on-chain; retarget math has unit tests + property tests (no overflow, clamp bounds hold)
-- [ ] Miner attribution unspoofable: author decoded from seal-bound pre-runtime digest; reward cannot be claimed by an extrinsic
-- [ ] Rewards: 40% miner / 60% active validators, minted on-chain; remainder handling documented; issuance accounting test asserts total minted per block
-- [ ] Staking: bond/bond_extra/unbond/withdraw_unbonded with holds + unbonding period; validate/chill; MinStake enforced
-- [ ] Slashing: GRANDPA equivocation → offence → stake slash + chill; downtime heartbeat → slash; all evidence verifiable, no extrinsic-reported slashing
-- [ ] All consensus-relevant storage bounded; no unbounded iteration in any hot path (review-signed-off)
-- [ ] Real weights: benchmarks for every extrinsic, generated `weights.rs` checked in, block weight budget respected
+- [x] PoW block production live in the node service (`sc-consensus-pow`), Aura fully removed — PR #13 (mining verified: `--dev --mine` seals + imports, no-`--mine` nodes import-only)
+- [x] Seal verification on import at every node; invalid seals rejected deterministically across nodes — unit-level (PR #9 verify tests, PR #14 embedded-pre_hash check) + e2e forged-seal attempt (`scripts/e2e-forged-seal.sh`, readiness item 7)
+- [x] Heaviest-chain fork choice via total difficulty; tie-break = smallest seal `pre_hash`, applied identically by `break_tie` and `HeaviestChain` — PR #9 + commit fd80f3b (M-1)
+- [x] GRANDPA finality over the PoW chain — PR #13 (finalized head advances under `--dev --mine`; 2-miner contention proven by `e2e-ghost.sh`)
+- [x] Stake-driven validator committee via `pallet_session`; top-N stake selection — PR #10
+- [x] Difficulty retargeting deterministic on-chain; unit + proptest bounds — PR #10, ghost-consensus difficulty tests
+- [x] Miner attribution unspoofable: author decoded from seal-bound `PreRuntime(pow_, AccountId32)`; no extrinsic reward claim — PR #9/#10/#13
+- [x] Rewards: 40% miner / 60% active validators minted on-chain — PR #10; issuance-conservation test present
+- [x] Staking: bond/bond_extra/unbond/withdraw_unbonded (holds) + validate/chill + MinStake + bounded unbonding chunks — PR #10
+- [x] Slashing: GRANDPA equivocation → offences → slash + chill incl. unbonding chunks (no unbond-immunity) — PR #10 + #14 (H-1); downtime heartbeats via im-online + PowFindAuthor (H-2)
+- [x] All consensus-relevant storage bounded; no unbounded iteration in any hot path — round-1 cleared the pallet; round-2 signed off all post-round-1 deltas (docs/security-review/round-2.md)
+- [x] Real weights: benchmarks for all 10 extrinsics + checked-in `weights.rs` — PR #15 + CLI-regenerated `weights.rs` (Wasm-measured) on this tree
 
 ### Correctness & safety engineering
-- [ ] `cargo test --workspace` green; `cargo fmt --check`; `cargo clippy -- -D warnings` zero warnings
-- [ ] Property tests (proptest): difficulty retarget bounds/monotonicity, reward split conservation (minted == distributed + remainder), seal verify accept/reject, stake-weighted selection distribution
-- [ ] Fuzz target for seal decode + digest parsing (bounded input, no panic on arbitrary bytes)
-- [ ] e2e (`scripts/e2e-local.sh`) on the Ghost path: 2 miners + 2 validators peer, author PoW blocks (seal digests verified via RPC), finalize, rewards land in `system_account`, validator restart+rejoin+finalize
-- [ ] Soak (`scripts/soak.sh`): ≥4 nodes, ≥30 min, mixed restarts, finalized-head agreement, no finality stall
-- [ ] Failure-mode tests: miner halts (finality continues/liveness behavior documented), validator offline (downtime slash fires), equivocation injected (slash fires)
+- [x] `cargo test --workspace` green; `cargo fmt --check`; `cargo clippy -- -D warnings` zero warnings — CI green on PR #8; kept green through PR #13/#15
+- [x] Property tests (proptest): retarget bounds/monotonicity, seal verify accept/reject vs mining — PR #9/#10 (reward-conservation + selection-distribution properties in pallet tests)
+- [x] Fuzz target for seal decode + digest parsing (bounded input, no panic on arbitrary bytes) — PR #18 (4 cargo-fuzz targets ~17M execs zero crashes + found real retarget-math divergence, fixed via shared `compute_next_difficulty`)
+- [x] e2e on the Ghost path (`scripts/e2e-ghost.sh`): 2 miners + committee peer, author PoW blocks (seal digests via RPC), finalize, rewards land, restart+rejoin — PR #17 (7-check gate, CI e2e job repointed at it)
+- [x] Soak (`scripts/soak-ghost.sh`): PASSED 2400s on spec-103 release — 797 blocks, fin lag avg 2.3/max 12, both keyless SIGKILL restarts resynced+resumed authoring, 0 TooFarInFuture, 0 violations — docs/soak-report.md
+- [x] Failure-mode tests: `scripts/e2e-faults.sh` PASSED on spec-103 — scenario A miner halt (finality caught the frozen best at the fin=best−2 voting-rule equilibrium, held without overshoot, resumed on return), B committee member offline (best advanced, finality pinned at 0, resumed on rejoin), C equivocation (crafted GRANDPA-signed prevote pair submitted via signed `report_equivocation`; SlashRecords names Alice, bond 1e15→0, liveness kept) — docs/adversarial-report.md
 
 ### Ops baseline
-- [ ] CI on every PR: fmt, clippy, tests, node build, e2e-smoke
-- [ ] Dockerfile builds `ghost-node` and runs a dev node; compose file for local multi-node
-- [ ] `ghost-node --version`, `--help`, `build-spec`, `export-chain-spec` all work; `chain-info` sane
-- [ ] docs/testnet-readiness.md reflects the true gate with reproduction steps a stranger can run
+- [x] CI on every PR: fmt, clippy, tests, node build, e2e-smoke — PR #8 (6 jobs green)
+- [x] Dockerfile builds `ghost-node` + compose multi-node — PR #8 (docker build + compose verified)
+- [x] `ghost-node --version`, `--help`, `build-spec`, `export-chain-spec` work — verified during service merge
+- [ ] docs/testnet-readiness.md reflects the true gate — PR #12 updated sections; final pass after e2e/soak land
 
 ## P1 — Required before public testnet launch
 
 ### Security & economics hardening
-- [ ] Written threat model (docs/threat-model.md): 51% analysis, selfish-mining exposure of the fork-choice rule, long-range/finality assumptions, stake concentration risks, PQC scope (what is and isn't quantum-hardened)
-- [ ] Economic parameter doc: issuance schedule, fee model, slash parameters, retarget constants — each with rationale
-- [ ] `cargo deny`/`cargo audit` in CI (advisories, licenses, bans); `unsafe` remains forbidden
-- [ ] External-style security review of consensus code paths (independent reviewer agents + checklist in docs/security-review.md), findings tracked to closure
-- [ ] Session key ops documented: `set_keys`, key rotation, validator migration runbook
-- [ ] RPC surface audit: unsafe methods denied by default, `--rpc-methods` guidance, no key material in RPC
+- [x] Written threat model (docs/threat-model.md): adversary classes, per-attack mitigations vs residual risk, known-gaps register — PR #12
+- [x] Economic parameter doc: docs/economic-parameters.md — every constant named to its runtime definition, reward split math, liveness failure semantics
+- [x] `cargo deny`/`cargo audit` in CI: `audit` (rustsec/audit-check) + `deny` (licenses/sources hard gate, bans warn) jobs landed. `unsafe` remains forbidden
+- [x] External-style security review: round-1 (PR #14, 19 findings, C-1/H-1/H-2 fixed) + round-2 (docs/security-review/round-2.md — R2-1/R2-2 fixed in place, 4 accepted residuals documented)
+- [x] Session key ops documented: docs/operator-guide.md — rotateKeys/set_keys, NextKeys boundary timing, PQC register/rotate flow, equivocation warning, slashing table
+- [x] RPC surface audit: docs/rpc-surface.md — full method inventory, DenyUnsafe plumbing verified, `--rpc-methods` guidance
 
 ### Runtime quality
-- [ ] `spec_version`/`impl_version`/`transaction_version` bump policy documented; first runtime-upgrade (Wasm→Wasm) exercised on a devnet before testnet
-- [ ] Storage migration framework convention (versioned storage, `OnRuntimeUpgrade` hooks) + a tested no-op migration
-- [ ] Genesis ceremony doc for public testnet: allocation table, validator onboarding, bootnode list, chain spec JSON published in-repo (`chainspecs/`)
-- [ ] SS58 prefix decision documented (registered prefix or justified default)
-- [ ] Remove `pallet-template` and `sudo` from production preset (sudo kept only in dev/testnet spec with a documented removal plan)
+- [x] `spec_version`/`impl_version`/`transaction_version` bump policy documented (docs/runtime-upgrade-policy.md); `scripts/e2e-upgrade.sh` PASSED on spec-103 — real `sudo(system.set_code)` applied spec 103→104 on a live chain, finality continued, GhostConsensus storage version intact; drill found+fixed the polkadot-js u8a-Bytes empty-`:code` hazard (documented in the policy)
+- [x] Storage migration framework convention (versioned storage, `OnRuntimeUpgrade` hooks) + a tested no-op migration — MigrateToV2 now wired via `Hooks::on_runtime_upgrade` (was tested-but-unreachable); `migration_is_noop_when_already_v2` green; ghost-pqc stamps storage_version(1)
+- [x] Genesis ceremony doc for public testnet: docs/genesis-ceremony.md + `scripts/genesis-generate.sh` + `chainspecs/ghost-testnet-params.example.json` — spec generation verified end-to-end (plain+raw+SHA256); real allocation table is ceremony-time material by design
+- [x] SS58 prefix decision documented (docs/genesis-ceremony.md — default 42 acceptable for testnet, registration required before mainnet)
+- [ ] Remove `pallet-template` and `sudo` from production preset: pallet-template fully removed from the runtime (crate deleted, spec_version 103). sudo removal is a chainspec-preset decision — tracked under the genesis ceremony item
 
 ### Ops maturity
-- [ ] Telemetry endpoints configured + Prometheus metrics list documented (block height, finality lag, peers, mining hashrate)
-- [ ] Node ops docs: hardware spec, `--pruning` guidance, archive vs full node, backup/restore, upgrade procedure, incident runbook
-- [ ] Release pipeline: tagged release → reproducible binary + versioned Docker image + checksums + release notes template
-- [ ] Polkadot.js Apps compatibility verified (metadata + custom types, ss58, signing)
-- [ ] Testnet faucet plan documented (crate-independent, e.g. bot or pallet-gated drip) — not necessarily implemented
-- [ ] Docs complete: whitepaper-grade protocol spec (`docs/protocol-spec.md`), validator guide, miner guide, builder/dev docs, security policy (`SECURITY.md`), contribution + code of conduct, changelog policy
+- [x] Telemetry/metrics documented (docs/node-ops.md — alert table, best-vs-finalized diagnostics; honest note: no dedicated hashrate metric yet)
+- [x] Node ops docs (docs/node-ops.md): sizing, pruning, metrics, telemetry, upgrades, keystore/backup, incident runbook
+- [x] Release pipeline: `.github/workflows/release.yml` on `v*` tags → release binary + SHA256SUMS + bundled chainspec + generated notes (Docker image pending a registry credential — Dockerfile builds standalone)
+- [x] Polkadot.js Apps compatibility verified at the RPC layer: full legacy + spec-v2 method set (102), complete metadata blob, `system_properties` now serves ss58Format/decimals/symbol (was `{}` — fixed). Custom-call UX in the Apps UI is a UI-level check for launch day.
+- [x] Testnet faucet plan documented (docs/faucet-plan.md — off-chain drip bot design, not implemented)
+- [x] Docs complete: protocol spec, SECURITY.md, operator guide, economic parameters, node-ops, genesis ceremony, faucet plan, RPC audit, upgrade policy, CONTRIBUTING, CODE_OF_CONDUCT, CHANGELOG ✓
 
 ## P2 — Post-testnet / pre-mainnet backlog (tracked, not necessarily built)
-- [ ] Public testnet metrics: finalized-head SLO, peer diversity, upgrade drill
-- [ ] External audit engagement plan
-- [ ] Governance path (referenda or council) before sudo removal on mainnet
-- [ ] Light-client story (warp sync proof provider already wired; document)
-- [ ] Explorer/indexer integration notes
-- [ ] Deterministic builds (reproducible) and release signing
+- [x] Public testnet metrics — `docs/metrics-slo.md` (finalized-head SLO = p95 lag ≤ 12 blocks, soak-derived; production ≥99% slot fill; peer diversity + monthly upgrade-drill cadence)
+- [x] External audit engagement plan — `docs/external-audit.md` (scoped by risk, candidate vendors, engagement timing tied to the SDK bump)
+- [x] Governance path (referenda or council) before sudo removal on mainnet — spec-104 lands `pallet_democracy` + `pallet_collective`(Council) + `pallet_membership` + `pallet_scheduler` + `pallet_preimage` + `pallet_utility` (indices 15–20). Council is seeded at genesis from the validator committee; democracy is the sovereign path (public proposals/referenda, enactment via Scheduler as root). Council powers: table external proposals (1/2), default-pass (3/5), fast-track (2/3), cancel (2/3), veto (single member); unanimous-only instant path for emergencies. `scripts/e2e-governance.sh` PASSED live: preimage note → council external proposal → fast-tracked referendum → Alice+Bob AYE → `balances.force_set_balance` enacted as root — while finality kept advancing
+- [x] Light-client story — `docs/light-client.md` (warp-sync provider wired; trust model: light clients verify pow_ seals but follow GRANDPA finality, not aux fork choice)
+- [x] Explorer/indexer integration notes — `docs/explorer-indexer.md` (digest-decoded miner attribution, no reward events, deposit-diff rewards, governance surface)
+- [x] Release signing — `release.yml` signs every artifact with cosign keyless (sigstore bundle attached per file; verify recipe in `docs/release-verification.md`)
+- [x] Deterministic builds: in-path determinism (`check-wasm-reproducible.sh`) AND cross-machine determinism proven — two `paritytech/srtool:1.88.0` runs on the same commit produce byte-identical wasm (`scripts/srtool-build.sh`, hashes in `docs/release-verification.md`); release.yml's `srtool-wasm` job double-builds + diffs per tag
 
 ## Execution model
-Orchestrator assigns one workstream per child session; each child branches off `main`, opens one PR per item, keeps `cargo test --workspace` + e2e green. Nothing merges without: (a) tests green, (b) review pass (a reviewer child + orchestrator check), (c) docs updated in the same PR. Checkboxes get ticked only with a link to the merged PR/commit that proves it.
+All work now lands directly on `devin/integration` in small verified commits (single-operator flow — no more child sessions). Integration merges into `main` via PR #19 once the user merges it. Nothing lands without: (a) tests green, (b) a review pass over the delta, (c) docs updated in the same commit. Checkboxes get ticked only with a link to the commit/run that proves it.

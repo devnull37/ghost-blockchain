@@ -1,0 +1,53 @@
+name: soak
+
+# Multi-node long-run soak (`scripts/soak-ghost.sh`): scheduled weekly and
+# manually dispatchable — too long to gate every PR. QUICK=0 is the full
+# profile; QUICK=1 (300 s) is for smoke-checking the harness itself.
+on:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      quick:
+        description: "Run the 300s QUICK harness profile instead of the full soak"
+        required: true
+        default: "0"
+        type: choice
+        options: ["0", "1"]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  WASM_BUILD_WORKSPACE_HINT: ${{ github.workspace }}
+
+jobs:
+  soak:
+    name: soak
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm libclang-dev protobuf-compiler libudev-dev pkg-config
+      - name: Resolve bindgen environment
+        run: |
+          set -eux
+          echo "LIBCLANG_PATH=$(dirname "$(find /usr/lib -name 'libclang.so' | head -n1)")" >> "$GITHUB_ENV"
+          echo "BINDGEN_EXTRA_CLANG_ARGS=-I$(gcc -print-file-name=include) -I/usr/include/x86_64-linux-gnu -I/usr/include" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.88.0"
+          components: rust-src
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: soak
+      - name: Run soak-ghost.sh
+        env:
+          QUICK: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.quick || '0' }}
+          SOAK_MINING_THREADS: "2"
+        run: bash scripts/soak-ghost.sh

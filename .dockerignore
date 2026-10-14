@@ -1,0 +1,9 @@
+# Build context exclusions — keep the image build lean and deterministic.
+.git
+.github
+.claude
+docs
+env-setup
+target
+**/target
+*.log

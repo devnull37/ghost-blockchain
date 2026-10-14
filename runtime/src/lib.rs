@@ -11,7 +11,7 @@ pub mod configs;
 extern crate alloc;
 use alloc::vec::Vec;
 use sp_runtime::{
-    create_runtime_str, generic, impl_opaque_keys,
+    generic, impl_opaque_keys,
     traits::{BlakeTwo256, IdentifyAccount, Verify},
     MultiAddress, MultiSignature,
 };
@@ -52,8 +52,8 @@ pub mod opaque {
 
 impl_opaque_keys! {
     pub struct SessionKeys {
-        pub aura: Aura,
         pub grandpa: Grandpa,
+        pub im_online: ImOnline,
     }
 }
 
@@ -61,19 +61,26 @@ impl_opaque_keys! {
 // https://docs.substrate.io/main-docs/build/upgrade#runtime-versioning
 #[sp_version::runtime_version]
 pub const VERSION: RuntimeVersion = RuntimeVersion {
-    spec_name: create_runtime_str!("ghost-runtime"),
-    impl_name: create_runtime_str!("ghost-runtime"),
+    spec_name: alloc::borrow::Cow::Borrowed("ghost-runtime"),
+    impl_name: alloc::borrow::Cow::Borrowed("ghost-runtime"),
     authoring_version: 1,
     // The version of the runtime specification. A full node will not attempt to use its native
     //   runtime in substitute for the on-chain Wasm runtime unless all of `spec_name`,
     //   `spec_version`, and `authoring_version` are the same between Wasm and native.
     // This value is set to 100 to notify Polkadot-JS App (https://polkadot.js.org/apps) to use
     //   the compatible custom types.
-    spec_version: 100,
+    // 102: pallet-template removed from the runtime; pallet-ghost-pqc
+    // composed at index 14.
+    // 103: MigrateToV2 wired via Hooks::on_runtime_upgrade, ghost-pqc
+    // storage_version(1) stamped, system_properties in chainspecs.
+    // 104: governance stack — utility/scheduler/preimage at 15-17, council
+    // (collective+membership) at 18-19, democracy at 20.
+    spec_version: 104,
     impl_version: 1,
     apis: apis::RUNTIME_API_VERSIONS,
     transaction_version: 1,
-    state_version: 1,
+    // stable2407's state_version became system_version in stable2412.
+    system_version: 1,
 };
 
 mod block_times {
@@ -201,9 +208,6 @@ mod runtime {
     #[runtime::pallet_index(1)]
     pub type Timestamp = pallet_timestamp;
 
-    #[runtime::pallet_index(2)]
-    pub type Aura = pallet_aura;
-
     #[runtime::pallet_index(3)]
     pub type Grandpa = pallet_grandpa;
 
@@ -216,11 +220,60 @@ mod runtime {
     #[runtime::pallet_index(6)]
     pub type Sudo = pallet_sudo;
 
-    // Include the custom logic from the pallet-template in the runtime.
-    #[runtime::pallet_index(7)]
-    pub type Template = pallet_template;
+    // Index 7 is retired: it used to hold the template demo pallet, removed
+    // from the runtime. Do not reuse it — a new pallet there would collide
+    // with any chain history that still has the old index.
 
-    // Include the Ghost Consensus pallet
+    // Include the Ghost Consensus pallet. It must come before Session so
+    // genesis stakes/candidates exist when session genesis selects the
+    // initial validator set.
     #[runtime::pallet_index(8)]
     pub type GhostConsensus = pallet_ghost_consensus;
+
+    #[runtime::pallet_index(9)]
+    pub type Session = pallet_session;
+
+    // Historical session trie (equivocation proof data).
+    #[runtime::pallet_index(10)]
+    pub type Historical = pallet_session::historical::Pallet<Runtime>;
+
+    #[runtime::pallet_index(11)]
+    pub type Authorship = pallet_authorship;
+
+    #[runtime::pallet_index(12)]
+    pub type Offences = pallet_offences;
+
+    #[runtime::pallet_index(13)]
+    pub type ImOnline = pallet_im_online;
+
+    // ML-DSA-87 validator key registry; consulted by GhostConsensus::validate
+    // through `PqcProvider` once `RequirePqcKey` is set.
+    #[runtime::pallet_index(14)]
+    pub type GhostPqc = pallet_ghost_pqc;
+
+    // --- Governance --------------------------------------------------------
+    // Utility (batch) first so democracy/scheduler calls can be batched.
+    #[runtime::pallet_index(15)]
+    pub type Utility = pallet_utility;
+
+    // Scheduler + preimage are the dispatch machinery democracy leans on for
+    // delayed enactment and call lookup by hash.
+    #[runtime::pallet_index(16)]
+    pub type Scheduler = pallet_scheduler;
+
+    #[runtime::pallet_index(17)]
+    pub type Preimage = pallet_preimage;
+
+    // Council: collective instance 1. Seeded at genesis with the initial
+    // validator committee; membership changes go through root (and, once
+    // democracy is live, through referenda).
+    #[runtime::pallet_index(18)]
+    pub type Council = pallet_collective::Pallet<Runtime, Instance1>;
+
+    #[runtime::pallet_index(19)]
+    pub type CouncilMembership = pallet_membership::Pallet<Runtime, Instance1>;
+
+    // Public token-holder referenda.
+    #[runtime::pallet_index(20)]
+    pub type Democracy = pallet_democracy;
 }

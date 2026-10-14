@@ -26,9 +26,15 @@
 frame_benchmarking::define_benchmarks!(
     [frame_benchmarking, BaselineBench::<Runtime>]
     [frame_system, SystemBench::<Runtime>]
-    [frame_system_extensions, SystemExtensionsBench::<Runtime>]
     [pallet_balances, Balances]
     [pallet_timestamp, Timestamp]
     [pallet_sudo, Sudo]
-    [pallet_template, Template]
+    [pallet_ghost_consensus, GhostConsensus]
+    [pallet_ghost_pqc, GhostPqc]
+    [pallet_utility, Utility]
+    [pallet_scheduler, Scheduler]
+    [pallet_preimage, Preimage]
+    [pallet_collective, Council]
+    [pallet_membership, CouncilMembership]
+    [pallet_democracy, Democracy]
 );

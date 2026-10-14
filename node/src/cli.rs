@@ -6,6 +6,33 @@ pub struct Cli {
 
     #[clap(flatten)]
     pub run: sc_cli::RunCmd,
+
+    /// PoW mining flags (see `docs/ghost-consensus-design.md` §9).
+    #[clap(flatten)]
+    pub mining: MiningCmd,
+}
+
+/// PoW authoring flags for `ghost-node`.
+///
+/// `--mine` turns this node into a block author: `start_mining_worker`
+/// proposes blocks on the heaviest chain and `--mining-threads` grind threads
+/// race to seal them. `--miner-coinbase` is the `AccountId32` written into the
+/// `PreRuntime(POW_ENGINE_ID, _)` digest — the unspoofable miner attribution
+/// the pallet pays block rewards to.
+#[derive(Debug, Clone, clap::Args)]
+pub struct MiningCmd {
+    /// Author PoW blocks (grind seals and submit them for import).
+    #[arg(long)]
+    pub mine: bool,
+
+    /// Number of PoW grinding threads. Defaults to all available CPU cores.
+    #[arg(long, value_name = "N", requires = "mine")]
+    pub mining_threads: Option<usize>,
+
+    /// SS58 account recorded as the miner of authored blocks (the reward
+    /// coinbase). Required with `--mine`; under `--dev` it defaults to Alice.
+    #[arg(long, value_name = "SS58", requires = "mine")]
+    pub miner_coinbase: Option<String>,
 }
 
 #[derive(Debug, clap::Subcommand)]
@@ -48,71 +75,38 @@ pub enum Subcommand {
     /// Db meta columns information.
     ChainInfo(sc_cli::ChainInfoCmd),
 
-    /// Ghost-specific informational commands
+    /// Ghost-specific commands.
     #[command(subcommand)]
     Ghost(GhostCommands),
 }
 
-/// Ghost-specific informational commands.
+/// Ghost-specific commands.
 #[derive(Debug, clap::Subcommand)]
 pub enum GhostCommands {
-    /// Run the local PoW demo miner
-    #[command(name = "mine")]
-    Mine {
-        /// Number of threads to use for mining
-        #[arg(long, default_value = "1")]
-        threads: usize,
+    /// Verify the PoW seal of a block in the local chain database.
+    ///
+    /// Recomputes the Ghost PoW check: pops the trailing
+    /// `Seal(POW_ENGINE_ID, GhostSeal)` digest, re-hashes the header for the
+    /// pre-hash, pulls the `PreRuntime(POW_ENGINE_ID, AccountId32)` miner
+    /// digest, and evaluates `hash * difficulty <= U256::MAX` with the
+    /// difficulty the runtime recorded for the parent.
+    #[command(name = "verify-pow")]
+    VerifyPow(VerifyPowCmd),
+}
 
-        /// Mining difficulty target
-        #[arg(long)]
-        difficulty: Option<u64>,
-    },
+/// `ghost verify-pow <BLOCK_HASH>` arguments.
+#[derive(Debug, clap::Args)]
+pub struct VerifyPowCmd {
+    /// Block hash (hex, `0x`-prefixed) of a block present in the local database.
+    #[arg(value_name = "BLOCK_HASH")]
+    pub block_hash: String,
 
-    /// Show the staking call shape used by the pallet prototype
-    #[command(name = "stake")]
-    Stake {
-        /// Amount to stake (in Ghost tokens)
-        #[arg(long)]
-        amount: u128,
+    #[command(flatten)]
+    pub shared_params: sc_cli::SharedParams,
+}
 
-        /// Account to stake from (if not provided, uses default account)
-        #[arg(long)]
-        account: Option<String>,
-    },
-
-    /// Show the unstaking call shape used by the pallet prototype
-    #[command(name = "unstake")]
-    Unstake {
-        /// Amount to unstake
-        #[arg(long)]
-        amount: u128,
-
-        /// Account to unstake from
-        #[arg(long)]
-        account: Option<String>,
-    },
-
-    /// Check balance and staking information
-    #[command(name = "balance")]
-    Balance {
-        /// Account to check (if not provided, shows all accounts)
-        #[arg(long)]
-        account: Option<String>,
-    },
-
-    /// Show an honest consensus status summary
-    #[command(name = "status")]
-    Status {
-        /// Show detailed information
-        #[arg(long)]
-        detailed: bool,
-    },
-
-    /// Show validator information
-    #[command(name = "validators")]
-    Validators {
-        /// Show only active validators
-        #[arg(long)]
-        active_only: bool,
-    },
+impl sc_cli::CliConfiguration for VerifyPowCmd {
+    fn shared_params(&self) -> &sc_cli::SharedParams {
+        &self.shared_params
+    }
 }

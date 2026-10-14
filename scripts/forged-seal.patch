@@ -1,0 +1,32 @@
+--- a/consensus/ghost-consensus/src/algorithm.rs	2026-10-03 17:15:23.599580429 +0000
++++ b/consensus/ghost-consensus/src/algorithm.rs	2026-10-03 19:23:55.803948175 +0000
+@@ -204,7 +204,11 @@
+         seal: &Seal,
+         difficulty: Self::Difficulty,
+     ) -> Result<bool, Error<B>> {
+-        Ok(verify_seal(pre_hash.as_ref(), pre_digest, seal, difficulty))
++        // EVIL BUILD ONLY — accepts any seal so the forged blocks this binary
++        // authors are importable by ITSELF. Honest nodes still run the real
++        // verify_seal and reject them (corrupt embedded pre_hash).
++        let _ = (pre_hash, pre_digest, seal, difficulty);
++        Ok(true)
+     }
+ }
+ 
+--- a/consensus/ghost-consensus/src/mining.rs	2026-10-03 13:36:38.002954552 +0000
++++ b/consensus/ghost-consensus/src/mining.rs	2026-10-03 19:23:55.803948175 +0000
+@@ -56,9 +56,13 @@
+     nonce: u64,
+     difficulty: U256,
+ ) -> Option<GhostSeal> {
++    // EVIL BUILD ONLY — the embedded `pre_hash` is corrupted to a constant.
++    // The PoW is still real (hash computed over the true pre_hash), but
++    // honest `verify_seal` compares the embedded pre_hash to the header's
++    // own and rejects every block this binary produces.
+     let seal = GhostSeal {
+         nonce,
+-        pre_hash: pre_hash.try_into().ok()?,
++        pre_hash: [0xEE; 32],
+     };
+     pow_meets(pow_value(pre_hash, pre_digest, &seal), difficulty).then_some(seal)
+ }
