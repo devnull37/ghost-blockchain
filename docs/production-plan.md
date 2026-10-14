@@ -6,9 +6,9 @@ Release bar: the standard a top-tier organization would apply before shipping a 
 
 ### Consensus core (must be real, not simulated)
 - [x] PoW block production live in the node service (`sc-consensus-pow`), Aura fully removed — PR #13 (mining verified: `--dev --mine` seals + imports, no-`--mine` nodes import-only)
-- [ ] Seal verification on import at every node; invalid seals rejected deterministically across nodes (proven by e2e with a forged-seal block attempt) — unit-level done (PR #9 verify tests, PR #14 embedded-pre_hash check); e2e forged-block attempt pending
+- [x] Seal verification on import at every node; invalid seals rejected deterministically across nodes — unit-level (PR #9 verify tests, PR #14 embedded-pre_hash check) + e2e forged-seal attempt (`scripts/e2e-forged-seal.sh`, readiness item 7)
 - [x] Heaviest-chain fork choice via total difficulty; tie-break = smallest seal `pre_hash`, applied identically by `break_tie` and `HeaviestChain` — PR #9 + commit fd80f3b (M-1)
-- [x] GRANDPA finality over the PoW chain — PR #13 (finalized head advances under `--dev --mine`; 2-miner contention proven by e2e, pending)
+- [x] GRANDPA finality over the PoW chain — PR #13 (finalized head advances under `--dev --mine`; 2-miner contention proven by `e2e-ghost.sh`)
 - [x] Stake-driven validator committee via `pallet_session`; top-N stake selection — PR #10
 - [x] Difficulty retargeting deterministic on-chain; unit + proptest bounds — PR #10, ghost-consensus difficulty tests
 - [x] Miner attribution unspoofable: author decoded from seal-bound `PreRuntime(pow_, AccountId32)`; no extrinsic reward claim — PR #9/#10/#13
