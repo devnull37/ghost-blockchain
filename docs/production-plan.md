@@ -58,7 +58,7 @@ Release bar: the standard a top-tier organization would apply before shipping a 
 - [x] Docs complete: protocol spec, SECURITY.md, operator guide, economic parameters, node-ops, genesis ceremony, faucet plan, RPC audit, upgrade policy, CONTRIBUTING, CODE_OF_CONDUCT, CHANGELOG ✓
 
 ## P2 — Post-testnet / pre-mainnet backlog (tracked, not necessarily built)
-- [ ] Public testnet metrics: finalized-head SLO, peer diversity, upgrade drill
+- [x] Public testnet metrics — `docs/metrics-slo.md` (finalized-head SLO = p95 lag ≤ 12 blocks, soak-derived; production ≥99% slot fill; peer diversity + monthly upgrade-drill cadence)
 - [x] External audit engagement plan — `docs/external-audit.md` (scoped by risk, candidate vendors, engagement timing tied to the SDK bump)
 - [x] Governance path (referenda or council) before sudo removal on mainnet — spec-104 lands `pallet_democracy` + `pallet_collective`(Council) + `pallet_membership` + `pallet_scheduler` + `pallet_preimage` + `pallet_utility` (indices 15–20). Council is seeded at genesis from the validator committee; democracy is the sovereign path (public proposals/referenda, enactment via Scheduler as root). Council powers: table external proposals (1/2), default-pass (3/5), fast-track (2/3), cancel (2/3), veto (single member); unanimous-only instant path for emergencies. `scripts/e2e-governance.sh` PASSED live: preimage note → council external proposal → fast-tracked referendum → Alice+Bob AYE → `balances.force_set_balance` enacted as root — while finality kept advancing
 - [x] Light-client story — `docs/light-client.md` (warp-sync provider wired; trust model: light clients verify pow_ seals but follow GRANDPA finality, not aux fork choice)
