@@ -24,7 +24,24 @@ allow = [
     "Unicode-3.0",
     "Unlicense",
     "Zlib",
+    # Parity licenses the Substrate *client* crates (sc-service, sc-cli,
+    # sc-network, sc-basic-authorship, ...) as GPLv3 + Classpath exception:
+    # the exception explicitly says linking does NOT create a derivative
+    # work — it is the mechanism that lets a Substrate binary ship without
+    # GPL propagation. Runtime/Wasm crates are Apache-2.0; this allow entry
+    # covers the node-side client stack only.
+    "GPL-3.0-or-later WITH Classpath-exception-2.0",
 ]
+
+# ring 0.16.20's manifest license field ("Apache-2.0/GPL-3.0") is not a
+# valid SPDX expression, so cargo-deny treats the crate as unlicensed.
+# ring's LICENSE file is the well-known ISC-style ring license; clarify it
+# with the expression cargo-deny's own docs use for ring.
+[[licenses.clarify]]
+name = "ring"
+version = "0.16.20"
+expression = "MIT AND ISC AND OpenSSL"
+license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
 
 [bans]
 # Substrate pulls many legitimate duplicate versions (syn 1/2, semver,

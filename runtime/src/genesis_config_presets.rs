@@ -229,13 +229,12 @@ mod tests {
             // The real path: patch merged over the default genesis config,
             // then every pallet's genesis build runs — panics (e.g. "Members
             // are already initialized!") fail here.
-            let mut merged =
-                serde_json::to_value(crate::RuntimeGenesisConfig::default()).unwrap();
+            let mut merged = serde_json::to_value(crate::RuntimeGenesisConfig::default()).unwrap();
             json_merge(&mut merged, &patch);
             sp_io::TestExternalities::default().execute_with(|| {
-                frame_support::genesis_builder_helper::build_state::<
-                    crate::RuntimeGenesisConfig,
-                >(serde_json::to_vec(&merged).unwrap())
+                frame_support::genesis_builder_helper::build_state::<crate::RuntimeGenesisConfig>(
+                    serde_json::to_vec(&merged).unwrap(),
+                )
                 .unwrap_or_else(|e| panic!("preset {name} failed build_state: {e:?}"));
             });
         }
@@ -250,10 +249,19 @@ mod tests {
                 .unwrap_or_else(|| panic!("{name} missing councilMembership.members"));
             assert!(!members.is_empty(), "{name}: council must not be empty");
             // Council == genesis validators (the stake-backed identities).
-            let validators = patch["ghostConsensus"]["initialValidators"].as_array().unwrap();
-            assert_eq!(members.len(), validators.len(), "{name}: council != validator set");
+            let validators = patch["ghostConsensus"]["initialValidators"]
+                .as_array()
+                .unwrap();
+            assert_eq!(
+                members.len(),
+                validators.len(),
+                "{name}: council != validator set"
+            );
             for m in members {
-                assert!(validators.contains(m), "{name}: council member {m} not a validator");
+                assert!(
+                    validators.contains(m),
+                    "{name}: council member {m} not a validator"
+                );
             }
         }
     }
