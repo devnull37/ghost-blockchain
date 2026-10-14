@@ -195,3 +195,75 @@ pub fn get_preset(id: &PresetId) -> Option<Vec<u8>> {
 pub fn preset_names() -> Vec<PresetId> {
     vec![PresetId::from("dev"), PresetId::from("local_testnet")]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every shipped preset must parse, pass `build_state`, and seed the
+    /// governance council — this is what catches a double-init panic (like
+    /// council+councilMembership both listing members) or a silently empty
+    /// Council before an operator ever boots a node.
+    fn preset_json(name: &'static str) -> Value {
+        let bytes = get_preset(&PresetId::from(name)).expect("preset exists");
+        serde_json::from_slice(&bytes).expect("preset is valid json")
+    }
+
+    /// Recursive object merge — the same patch-over-defaults semantics
+    /// `sc-chain-spec` applies when loading a `genesis.runtimeGenesis.patch`.
+    fn json_merge(base: &mut Value, patch: &Value) {
+        match (base, patch) {
+            (Value::Object(b), Value::Object(p)) => {
+                for (k, v) in p {
+                    json_merge(b.entry(k.clone()).or_insert(Value::Null), v);
+                }
+            }
+            (b, p) => *b = p.clone(),
+        }
+    }
+
+    #[test]
+    fn presets_build_state_cleanly() {
+        for name in ["dev", "local_testnet"] {
+            let patch = preset_json(name);
+            // The real path: patch merged over the default genesis config,
+            // then every pallet's genesis build runs — panics (e.g. "Members
+            // are already initialized!") fail here.
+            let mut merged =
+                serde_json::to_value(crate::RuntimeGenesisConfig::default()).unwrap();
+            json_merge(&mut merged, &patch);
+            sp_io::TestExternalities::default().execute_with(|| {
+                frame_support::genesis_builder_helper::build_state::<
+                    crate::RuntimeGenesisConfig,
+                >(serde_json::to_vec(&merged).unwrap())
+                .unwrap_or_else(|e| panic!("preset {name} failed build_state: {e:?}"));
+            });
+        }
+    }
+
+    #[test]
+    fn presets_seed_council_from_authorities() {
+        for name in ["dev", "local_testnet"] {
+            let patch = preset_json(name);
+            let members = patch["councilMembership"]["members"]
+                .as_array()
+                .unwrap_or_else(|| panic!("{name} missing councilMembership.members"));
+            assert!(!members.is_empty(), "{name}: council must not be empty");
+            // Council == genesis validators (the stake-backed identities).
+            let validators = patch["ghostConsensus"]["initialValidators"].as_array().unwrap();
+            assert_eq!(members.len(), validators.len(), "{name}: council != validator set");
+            for m in members {
+                assert!(validators.contains(m), "{name}: council member {m} not a validator");
+            }
+        }
+    }
+
+    #[test]
+    fn presets_have_sudo_and_session_keys() {
+        for name in ["dev", "local_testnet"] {
+            let patch = preset_json(name);
+            assert!(patch["sudo"]["key"].is_string(), "{name}: missing sudo key");
+            assert!(!patch["session"]["keys"].as_array().unwrap().is_empty());
+        }
+    }
+}
