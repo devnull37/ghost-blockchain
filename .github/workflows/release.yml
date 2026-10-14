@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write   # cosign keyless signing via GitHub OIDC
 
 env:
   CARGO_TERM_COLOR: always
@@ -47,8 +48,23 @@ jobs:
           set -eux
           mkdir dist
           cp target/release/ghost-node dist/
+          # The runtime wasm is THE upgrade artifact — release it with the
+          # node so validators can verify a runtime upgrade against the tag.
+          cp target/release/wbuild/solochain-template-runtime/solochain_template_runtime.wasm \
+             dist/ghost-runtime.wasm
           cp chainspecs/local.json dist/ghost-local.json 2>/dev/null || true
           (cd dist && sha256sum * > SHA256SUMS.txt)
+          ls -la dist
+      - name: Sign artifacts (cosign keyless)
+        uses: sigstore/cosign-installer@v3
+      - name: Produce signatures
+        run: |
+          set -eux
+          for f in dist/*; do
+            cosign sign-blob --yes \
+              --bundle "${f}.sigstore.json" \
+              "$f"
+          done
           ls -la dist
       - name: Create GitHub release with artifacts
         env:
@@ -59,3 +75,7 @@ jobs:
             --title "Ghost ${GITHUB_REF_NAME}" \
             --generate-notes \
             dist/*
+          # Append the verification instructions under the auto-notes.
+          BODY=$(gh release view "${{ github.ref_name }}" --json body -q .body)
+          printf '%s\n\n%s\n' "$BODY" "$(cat docs/release-verification.md)" > /tmp/notes.md
+          gh release edit "${{ github.ref_name }}" --notes-file /tmp/notes.md
