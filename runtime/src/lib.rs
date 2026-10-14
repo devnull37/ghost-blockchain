@@ -73,7 +73,9 @@ pub const VERSION: RuntimeVersion = RuntimeVersion {
     // composed at index 14.
     // 103: MigrateToV2 wired via Hooks::on_runtime_upgrade, ghost-pqc
     // storage_version(1) stamped, system_properties in chainspecs.
-    spec_version: 103,
+    // 104: governance stack — utility/scheduler/preimage at 15-17, council
+    // (collective+membership) at 18-19, democracy at 20.
+    spec_version: 104,
     impl_version: 1,
     apis: apis::RUNTIME_API_VERSIONS,
     transaction_version: 1,
@@ -247,4 +249,30 @@ mod runtime {
     // through `PqcProvider` once `RequirePqcKey` is set.
     #[runtime::pallet_index(14)]
     pub type GhostPqc = pallet_ghost_pqc;
+
+    // --- Governance --------------------------------------------------------
+    // Utility (batch) first so democracy/scheduler calls can be batched.
+    #[runtime::pallet_index(15)]
+    pub type Utility = pallet_utility;
+
+    // Scheduler + preimage are the dispatch machinery democracy leans on for
+    // delayed enactment and call lookup by hash.
+    #[runtime::pallet_index(16)]
+    pub type Scheduler = pallet_scheduler;
+
+    #[runtime::pallet_index(17)]
+    pub type Preimage = pallet_preimage;
+
+    // Council: collective instance 1. Seeded at genesis with the initial
+    // validator committee; membership changes go through root (and, once
+    // democracy is live, through referenda).
+    #[runtime::pallet_index(18)]
+    pub type Council = pallet_collective::Pallet<Runtime, Instance1>;
+
+    #[runtime::pallet_index(19)]
+    pub type CouncilMembership = pallet_membership::Pallet<Runtime, Instance1>;
+
+    // Public token-holder referenda.
+    #[runtime::pallet_index(20)]
+    pub type Democracy = pallet_democracy;
 }

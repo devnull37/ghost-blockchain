@@ -4,7 +4,25 @@ All notable changes to the Ghost chain are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). `spec_version`
 tracks the runtime; node versions tag independently.
 
-## Unreleased — spec_version 103
+## Unreleased — spec_version 104
+
+### Governance (104)
+- Composed `pallet_utility`/`pallet_scheduler`/`pallet_preimage` (15–17),
+  Council = `pallet_collective` I1 + `pallet_membership` I1 (18–19), and
+  `pallet_democracy` (20). Genesis seeds the Council from the validator
+  committee (via `councilMembership.members` only — seeding `council.members`
+  too panics on double init, caught live). Council: external proposals 1/2,
+  default-pass 3/5, fast-track 2/3, cancel 2/3, single-member veto;
+  `InstantAllowed` restricted to a unanimous council.
+- `e2e-governance.sh` + `upgrade-drill/governance-drill.js`: full lifecycle
+  gate — preimage note, council external proposal, instant fast-track
+  referendum, Alice+Bob token votes, scheduler root-enactment of
+  `balances.force_set_balance`, finality advancing. PASSED on spec-104.
+- CI: new `e2e-governance` job; `audit` job moved to a prebuilt cargo-audit
+  binary + `.cargo/audit.toml` documented ignores (SDK-pinned crates,
+  see `docs/security-advisories.md`).
+
+## Historical — spec_version 103
 
 ### Runtime (103)
 - `MigrateToV2` wired via `Hooks::on_runtime_upgrade` (was tested but

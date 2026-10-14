@@ -115,6 +115,18 @@ fn testnet_genesis(
                 .collect::<Vec<_>>(),
         },
         "sudo": SudoConfig { key: Some(root) },
+        // The Council is seeded from the genesis validator committee — the
+        // same stake-backed identities that finalize the chain also govern it
+        // until democracy moves membership changes through referenda. Only
+        // `councilMembership` carries the list: it calls
+        // `MembershipInitialized::initialize_members` on the collective, and
+        // passing `council.members` too panics with "already initialized!".
+        "councilMembership": {
+            "members": initial_authorities
+                .iter()
+                .map(|x| x.0.clone())
+                .collect::<Vec<_>>(),
+        },
     })
 }
 
