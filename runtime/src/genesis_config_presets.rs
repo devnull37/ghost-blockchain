@@ -55,7 +55,7 @@ const BOB_ED25519: [u8; 32] =
     hex_literal::hex!("d17c2d7823ebf260fd138f2d7e27d114c0145d968b5ff5006125f2414fadae69");
 
 fn account(public: [u8; 32]) -> AccountId {
-    AccountId32::from(public).into()
+    AccountId32::from(public)
 }
 
 fn grandpa(public: [u8; 32]) -> GrandpaId {

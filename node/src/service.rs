@@ -336,7 +336,7 @@ pub fn new_full<
         );
     }
 
-    let role = config.role.clone();
+    let role = config.role;
     let name = config.network.node_name.clone();
     let enable_grandpa = !config.disable_grandpa;
     let prometheus_registry = config.prometheus_registry().cloned();
