@@ -69,7 +69,7 @@ declare -A LIVE_PIDS=()
 LAST_PID=""
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ghost-faults.XXXXXX")"
 GHOST_E2E_HELPER_DIR="$TMP_DIR"
-trap 'kill $(printf "%s " "${!LIVE_PIDS[@]}") 2>/dev/null; sleep 1; kill -9 $(printf "%s " "${!LIVE_PIDS[@]}") 2>/dev/null; rm -rf "$TMP_DIR"' EXIT
+trap 'kill $(printf "%s " "${!LIVE_PIDS[@]}") 2>/dev/null || :; sleep 1; kill -9 $(printf "%s " "${!LIVE_PIDS[@]}") 2>/dev/null || :; rm -rf "$TMP_DIR"' EXIT
 
 diag_log() {
 	local log="$1" lines="${2:-60}"
