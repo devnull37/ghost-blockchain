@@ -64,7 +64,7 @@ Release bar: the standard a top-tier organization would apply before shipping a 
 - [x] Light-client story — `docs/light-client.md` (warp-sync provider wired; trust model: light clients verify pow_ seals but follow GRANDPA finality, not aux fork choice)
 - [x] Explorer/indexer integration notes — `docs/explorer-indexer.md` (digest-decoded miner attribution, no reward events, deposit-diff rewards, governance surface)
 - [x] Release signing — `release.yml` signs every artifact with cosign keyless (sigstore bundle attached per file; verify recipe in `docs/release-verification.md`)
-- [ ] Deterministic builds: IN-PATH determinism proven (`check-wasm-reproducible.sh`: two same-path clean builds → identical sha256). Cross-machine bit-reproducibility needs srtool — the remaining open item
+- [x] Deterministic builds: in-path determinism (`check-wasm-reproducible.sh`) AND cross-machine determinism proven — two `paritytech/srtool:1.88.0` runs on the same commit produce byte-identical wasm (`scripts/srtool-build.sh`, hashes in `docs/release-verification.md`); release.yml's `srtool-wasm` job double-builds + diffs per tag
 
 ## Execution model
 All work now lands directly on `devin/integration` in small verified commits (single-operator flow — no more child sessions). Integration merges into `main` via PR #19 once the user merges it. Nothing lands without: (a) tests green, (b) a review pass over the delta, (c) docs updated in the same commit. Checkboxes get ticked only with a link to the commit/run that proves it.

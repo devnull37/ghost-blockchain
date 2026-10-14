@@ -55,9 +55,14 @@ keys are ceremony output, never constants in the binary):
    `(account sr25519, grandpa ed25519, im_online sr25519)` + bonded
    account to the coordinator. Addresses/keys are *public* material; the
    secrets stay with each operator.
-2. Coordinator fills `chainspecs/ghost-testnet-params.example.json` into
-   a real params file (64-hex public keys; stakes in planck; `root` =
-   launch-ops key or `null`).
+2. Coordinator fills `chainspecs/ghost-testnet-params.example.json`
+   (testnet, `root` = launch-ops key) or
+   `chainspecs/ghost-mainnet-params.example.json` (production, `root` =
+   `null`) into a real params file (64-hex public keys; stakes in
+   planck). `root: null` removes the `sudo` section entirely —
+   democracy/council becomes the only root path. Verified live on
+   spec-104: a no-sudo spec generated this way boots and mines PoW
+   blocks (`ghost-nosudo-verify` run).
 3. `GENESIS_PARAMS=<params.json> rtk scripts/genesis-generate.sh chainspecs`
    produces `<id>.json` + `<id>-raw.json` + `SHA256SUMS.txt`. The script
    embeds the built runtime wasm, converts keys to SS58, and fails early
@@ -70,8 +75,9 @@ keys are ceremony output, never constants in the binary):
 ## Hard requirements before a public spec is real
 
 - No `pallet-template` anywhere (done — removed at spec 102).
-- `sudo` either absent or a documented launch-ops key with a published
-  removal plan (never a dev seed).
+- `sudo` either absent (`root: null` — the production default; see the
+  mainnet params example) or a documented launch-ops key with a
+  published removal plan (never a dev seed).
 - Every `stakers` entry = an account the operator actually controls; a
   genesis validator whose key is lost just burns a committee seat.
 - `spec_version` in the embedded Wasm matches `VERSION` at cut time.

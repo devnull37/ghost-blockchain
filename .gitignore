@@ -10,3 +10,6 @@
 # upgrade-drill JS tooling (npm install at run time)
 node_modules/
 package-lock.json
+
+# srtool / runtime-local build output
+runtime/target/

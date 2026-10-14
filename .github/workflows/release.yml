@@ -18,6 +18,50 @@ env:
   WASM_BUILD_WORKSPACE_HINT: ${{ github.workspace }}
 
 jobs:
+  srtool-wasm:
+    name: reproducible runtime wasm (srtool)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build runtime wasm twice in srtool and verify determinism
+        run: |
+          set -eux
+          mkdir -p runtime/target && chmod -R a+w runtime/target
+          build() {
+            docker run --rm \
+              -e PACKAGE=solochain-template-runtime \
+              -e RUNTIME_DIR=runtime \
+              -v "$PWD":/build \
+              paritytech/srtool:1.88.0 build 2>&1 | tee /tmp/srtool-$1.log
+            sha256sum runtime/target/srtool/release/wbuild/solochain-template-runtime/solochain_template_runtime.compact.compressed.wasm \
+              | awk '{print $1}' > /tmp/srtool-$1.sha
+          }
+          build 1
+          rm -rf runtime/target/srtool
+          build 2
+          diff /tmp/srtool-1.sha /tmp/srtool-2.sha
+          cat /tmp/srtool-1.sha
+      - name: Package srtool artifacts
+        run: |
+          set -eux
+          mkdir -p dist-srtool
+          cp runtime/target/srtool/release/wbuild/solochain-template-runtime/solochain_template_runtime.compact.compressed.wasm \
+             dist-srtool/ghost-runtime-srtool.wasm
+          (cd dist-srtool && sha256sum * > SHA256SUMS.txt)
+          cp /tmp/srtool-1.log dist-srtool/srtool-build.log
+      - uses: sigstore/cosign-installer@v3
+      - name: Sign srtool artifacts (cosign keyless)
+        run: |
+          set -eux
+          for f in dist-srtool/*; do
+            cosign sign-blob --yes --bundle "${f}.sigstore.json" "$f"
+          done
+      - name: Attach srtool artifacts to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.ref_name }}" dist-srtool/* --clobber
+
   release-binary:
     name: binary + checksums
     runs-on: ubuntu-latest
